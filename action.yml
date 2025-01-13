@@ -28,3 +28,8 @@ inputs:
   branch:
     description: 'If true, renegerate the endpoints in the Stainless config file.'
     required: false
+  old_oas_hash:
+    description: 'The md5 hash of the OpenAPI file used to create the parent build.'
+        required: false
+  old_config_hash:
+    description: 'The md5 hash of the Stainless config file used to create the parent build.'
