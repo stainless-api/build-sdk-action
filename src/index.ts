@@ -98,7 +98,7 @@ async function main() {
     }
 
     // Save results to a file for the workflow to use
-    fs.writeFileSync('api_results.json', JSON.stringify({
+    fs.writeFileSync('build_sdk_results.json', JSON.stringify({
       commit,
       parentCommit,
     }, null, 2));
