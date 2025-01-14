@@ -84,7 +84,7 @@ async function main() {
 
     const pollingStart = Date.now();
     while (Date.now() - pollingStart < MAX_POLLING_SECONDS * 1000) {
-      const buildOutput = await stainless.builds.outputs.retrieve({id: buildId, target: 'node'});
+      const buildOutput = await stainless.builds.outputs.retrieve({id: buildId, target: 'typescript'});
 
       if (!parentCommit && parentBuildId) {
         const parentBuildOutput = await stainless.builds.outputs.retrieve({id: parentBuildId, target: 'node'});
