@@ -87,7 +87,7 @@ async function main() {
       const buildOutput = await stainless.builds.outputs.retrieve({id: buildId, target: 'typescript'});
 
       if (!parentCommit && parentBuildId) {
-        const parentBuildOutput = await stainless.builds.outputs.retrieve({id: parentBuildId, target: 'node'});
+        const parentBuildOutput = await stainless.builds.outputs.retrieve({id: parentBuildId, target: 'typescript'});
         if (parentBuildOutput.commit.status === 'completed') {
           parentCommit = parentBuildOutput.commit.completed.commit;
           console.log("Parent build completed with commit:", parentCommit);
