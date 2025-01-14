@@ -77,8 +77,8 @@ async function main() {
         // create a new build
         const build = await stainless.builds.create({
             project: projectName,
-            oasSpec: fs.createReadStream(oasPath),
-            stainlessConfig: configPath ? fs.createReadStream(configPath) : undefined,
+            oasSpec: fs.createReadStream(oasPath, { encoding: 'utf8' }),
+            stainlessConfig: configPath ? fs.createReadStream(configPath, { encoding: 'utf8' }) : undefined,
             parentBuildId,
             branch,
             commitMessage,
