@@ -1,6 +1,7 @@
 import { Stainless } from 'stainless';
 import { getBooleanInput, getInput } from '@actions/core';
 import * as fs from 'fs';
+import * as path from 'path';
 
 // https://www.conventionalcommits.org/en/v1.0.0/
 const CONVENTIONAL_COMMIT_REGEX = new RegExp(
@@ -49,8 +50,22 @@ async function main() {
     // create a new build
     const build = await stainless.builds.create({
       project: projectName,
-      oasSpec: fs.createReadStream(oasPath, { encoding: 'utf8' }),
-      stainlessConfig: configPath ? fs.createReadStream(configPath, { encoding: 'utf8' }) : undefined,
+      oasSpec: new File(
+        [fs.readFileSync(oasPath)],
+        path.basename(oasPath),
+        {
+          type: 'text/plain',
+          lastModified: fs.statSync(oasPath).mtimeMs
+        }
+      ),
+      stainlessConfig: configPath ? new File(
+        [fs.readFileSync(configPath)],
+        path.basename(configPath),
+        {
+          type: 'text/plain',
+          lastModified: fs.statSync(configPath).mtimeMs
+        }
+      ) : undefined,
       parentBuildId,
       branch,
       commitMessage,
