@@ -92,7 +92,8 @@ async function main() {
             guessConfig
         }).asResponse();
         const buildId = build.headers.get('X-Stainless-Project-Build-ID');
-        const languages = (build.headers.get('X-Stainless-Project-Build-Languages')?.split(",") || []);
+        const languageHeader = build.headers.get('X-Stainless-Project-Build-Languages');
+        const languages = (languageHeader?.length ? languageHeader.split(",") : []);
         if (buildId && languages.length > 0) {
             console.log(`Created build with ID ${buildId} for languages: ${languages.join(", ")}`);
         }
