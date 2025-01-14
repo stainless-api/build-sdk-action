@@ -64,8 +64,8 @@ async function main() {
       process.exit(1);
     }
 
-    let parentCommit: string | undefined;
-    let commit: string | undefined;
+    let parentCommit: Stainless.Builds.Outputs.CommitBuildStep.Completed.Completed.Commit | undefined;
+    let commit: Stainless.Builds.Outputs.CommitBuildStep.Completed.Completed.Commit | undefined;
 
     const pollingStart = Date.now();
     while (Date.now() - pollingStart < MAX_POLLING_SECONDS * 1000) {

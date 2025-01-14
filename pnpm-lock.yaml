@@ -10,7 +10,7 @@ dependencies:
     version: 1.11.1
   stainless:
     specifier: github:stainless-api/builds-node-api
-    version: github.com/stainless-api/builds-node-api/7b5b6958fcade73e20bbd6d47a5808bd1e89e24c
+    version: github.com/stainless-api/builds-node-api/4c930e62eb48fb28bf0a76c7eb177e76934e2958
 
 devDependencies:
   '@types/node':
@@ -79,10 +79,10 @@ packages:
       '@fastify/busboy': 2.1.1
     dev: false
 
-  github.com/stainless-api/builds-node-api/7b5b6958fcade73e20bbd6d47a5808bd1e89e24c:
-    resolution: {tarball: https://codeload.github.com/stainless-api/builds-node-api/tar.gz/7b5b6958fcade73e20bbd6d47a5808bd1e89e24c}
+  github.com/stainless-api/builds-node-api/4c930e62eb48fb28bf0a76c7eb177e76934e2958:
+    resolution: {tarball: https://codeload.github.com/stainless-api/builds-node-api/tar.gz/4c930e62eb48fb28bf0a76c7eb177e76934e2958}
     name: stainless
-    version: 0.1.0-alpha.5
+    version: 0.1.0-alpha.6
     prepare: true
     requiresBuild: true
     dev: false
