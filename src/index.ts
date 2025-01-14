@@ -72,50 +72,63 @@ async function main() {
       guessConfig
     }).asResponse();
     const buildId = build.headers.get('X-Stainless-Project-Build-ID');
-    if (buildId) {
-      console.log("Created build:", buildId);
+    const languages = (build.headers.get('X-Stainless-Project-Build-Languages')?.split(",") || []) as Stainless.Builds.OutputRetrieveParams['target'][]
+    if (buildId && languages.length > 0) {
+      console.log(`Created build with ID ${buildId} for languages: ${languages.join(", ")}`);
     } else {
-      console.error("Missing build ID. Something went wrong.");
+      if (!buildId) {
+        console.error("Missing build ID. Something went wrong.");
+      }
+      if (languages.length === 0) {
+        console.error("No languages returned for this build. Something went wrong.");
+      }
       process.exit(1);
     }
 
-    let parentCommit: Stainless.Builds.Outputs.CommitBuildStep.Completed.Completed.Commit | undefined;
-    let commit: Stainless.Builds.Outputs.CommitBuildStep.Completed.Completed.Commit | undefined;
+    let parentOutcomes: Record<string, Stainless.Builds.Outputs.CommitBuildStep.Completed['completed']> = {};
+    let outcomes: Record<string, Stainless.Builds.Outputs.CommitBuildStep.Completed['completed']> = {};
 
     const pollingStart = Date.now();
-    while (Date.now() - pollingStart < MAX_POLLING_SECONDS * 1000) {
-      const buildOutput = await stainless.builds.outputs.retrieve({id: buildId, target: 'typescript'});
-
-      if (!parentCommit && parentBuildId) {
-        const parentBuildOutput = await stainless.builds.outputs.retrieve({id: parentBuildId, target: 'typescript'});
-        if (parentBuildOutput.commit.status === 'completed') {
-          parentCommit = parentBuildOutput.commit.completed.commit;
-          console.log("Parent build completed with commit:", parentCommit);
-        } else {
-          console.log("Parent build has status:", parentBuildOutput.commit.status);
+    while (Object.keys(outcomes).length < languages.length && Date.now() - pollingStart < MAX_POLLING_SECONDS * 1000) {
+      for (const language of languages) {
+        if (!(language in parentOutcomes) && parentBuildId) {
+          const parentBuildOutput = await stainless.builds.outputs.retrieve(parentBuildId, {target: language});
+          if (parentBuildOutput.commit.status === 'completed') {
+            const parentOutcome = parentBuildOutput.commit.completed;
+            console.log("Parent build completed with outcome:", JSON.stringify(parentOutcome));
+            parentOutcomes[language] = parentOutcome;
+          } else {
+            console.log(`Parent build has status ${parentBuildOutput.commit.status} for ${language}`);
+          }
         }
-      }
-      if (buildOutput.commit.status === 'completed') {
-        commit = buildOutput.commit.completed.commit;
-        console.log("Build completed with commit:", commit);
-        break;
-      } else {
-        console.log("Build has status:", buildOutput.commit.status);
+
+        if (!(language in outcomes)) {
+          const buildOutput = await stainless.builds.outputs.retrieve(buildId, {target: language});
+          if (buildOutput.commit.status === 'completed') {
+            const outcome = buildOutput.commit.completed;
+            console.log("Build completed with outcome:", JSON.stringify(outcome));
+            outcomes[language] = outcome;
+          } else {
+            console.log(`Build has status ${buildOutput.commit.status} for ${language}`);
+          }
+        }
       }
 
       // wait a bit before polling again
       await new Promise(resolve => setTimeout(resolve, 5000));
     }
 
-    if (!commit) {
-      console.error("Timed out waiting for build to complete.");
-      process.exit(1);
+    const languagesWithoutOutcome = languages.filter(language => !(language in outcomes));
+    for (const language of languagesWithoutOutcome) {
+      outcomes[language] = {
+        conclusion: 'timed_out',
+      };
     }
 
     // Save results to a file for the workflow to use
     fs.writeFileSync('build_sdk_results.json', JSON.stringify({
-      commit,
-      parentCommit,
+      outcomes,
+      parentOutcomes,
     }, null, 2));
   } catch (error) {
     console.error("Error interacting with API:", error);

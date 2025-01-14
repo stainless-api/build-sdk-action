@@ -34,7 +34,7 @@ export class Builds extends APIResource {
    * Retrieve a list of builds for a project
    */
   list(query: BuildListParams, options?: RequestOptions): APIPromise<BuildListResponse> {
-    return this._client.get('/api/v1/builds', { query, ...options });
+    return this._client.get('/v1/builds', { query, ...options });
   }
 }
 
