@@ -88,6 +88,11 @@ export interface BuildListParams {
   project: string;
 
   /**
+   * Optional filter - the branch the build was created on
+   */
+  branch?: string;
+
+  /**
    * Optional filter - the md5 hash of the Stainless config used for the build
    */
   config_hash?: string;

@@ -2,6 +2,7 @@ import { Stainless } from 'stainless';
 import { getBooleanInput, getInput } from '@actions/core';
 import * as fs from 'fs';
 import * as path from 'path';
+import crypto from 'crypto';
 
 // https://www.conventionalcommits.org/en/v1.0.0/
 const CONVENTIONAL_COMMIT_REGEX = new RegExp(
@@ -20,8 +21,9 @@ async function main() {
     const projectName = getInput('project_name', { required: true });
     const oasPath = getInput('oas_path', { required: true });
     const configPath = getInput('config_path', { required: false }) || undefined;
-    const oldOasHash = getInput('old_oas_hash', { required: false }) || undefined;
-    const oldConfigHash = getInput('old_config_hash', { required: false }) || undefined;
+    const parentOasHash = getInput('parent_oas_hash', { required: false }) || undefined;
+    const parentConfigHash = getInput('parent_config_hash', { required: false }) || undefined;
+    const parentBranch = getInput('parent_branch', { required: false }) || undefined;
     const branch = getInput('branch', { required: false }) || undefined;
     const commitMessage = getInput('commit_message', { required: false }) || undefined;
     const guessConfig = getBooleanInput('guess_config', { required: false });
@@ -36,8 +38,9 @@ async function main() {
     // attempt to find a parent build
     const recentBuilds = await stainless.builds.list({
         project: projectName,
-        spec_hash: oldOasHash,
-        config_hash: oldConfigHash,
+        spec_hash: parentOasHash,
+        config_hash: parentConfigHash,
+        branch: parentBranch,
         limit: 1,
     });
     const parentBuildId = recentBuilds[0]?.id || undefined;
@@ -47,19 +50,22 @@ async function main() {
       console.log("No parent build found.");
     }
 
+    const oasBuffer = fs.readFileSync(oasPath);
+    const configBuffer = configPath ? fs.readFileSync(configPath) : undefined;
+
     // create a new build
     const build = await stainless.builds.create({
       project: projectName,
       oasSpec: new File(
-        [fs.readFileSync(oasPath)],
+        [oasBuffer],
         path.basename(oasPath),
         {
           type: 'text/plain',
           lastModified: fs.statSync(oasPath).mtimeMs
         }
       ),
-      stainlessConfig: configPath ? new File(
-        [fs.readFileSync(configPath)],
+      stainlessConfig: configPath && configBuffer ? new File(
+        [configBuffer],
         path.basename(configPath),
         {
           type: 'text/plain',
@@ -71,19 +77,27 @@ async function main() {
       commitMessage,
       guessConfig
     }).asResponse();
-    const buildId = build.headers.get('X-Stainless-Project-Build-ID');
+    let buildId = build.headers.get('X-Stainless-Project-Build-ID');
     const languageHeader = build.headers.get('X-Stainless-Project-Build-Languages');
     const languages = (languageHeader?.length ? languageHeader.split(",") : []) as Stainless.Builds.OutputRetrieveParams['target'][]
     if (buildId && languages.length > 0) {
       console.log(`Created build with ID ${buildId} for languages: ${languages.join(", ")}`);
     } else {
       if (!buildId) {
-        console.error("Missing build ID. Something went wrong.");
+        console.log(`No new build was created. Checking for existing builds with the inputs provided...`);
+        buildId = (await stainless.builds.list({
+          project: projectName,
+          spec_hash: crypto.createHash('md5').update(oasBuffer).digest('hex'),
+          config_hash: configBuffer ? crypto.createHash('md5').update(configBuffer).digest('hex') : undefined,
+          branch,
+          limit: 1,
+        }))[0]?.id;
       }
-      if (languages.length === 0) {
-        console.error("No languages returned for this build. Something went wrong.");
+
+      if (!buildId) {
+        console.error("No existing build was found for this branch. Presumably it does not include SDK config changes");
+        process.exit(0);
       }
-      process.exit(1);
     }
 
     let parentOutcomes: Record<string, Stainless.Builds.Outputs.CommitBuildStep.Completed['completed']> = {};
