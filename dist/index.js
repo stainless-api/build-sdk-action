@@ -32,12 +32,16 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isValidConventionalCommitMessage = void 0;
 const stainless_1 = require("stainless");
 const core_1 = require("@actions/core");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const crypto_1 = __importDefault(require("crypto"));
 // https://www.conventionalcommits.org/en/v1.0.0/
 const CONVENTIONAL_COMMIT_REGEX = new RegExp(/^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\(.*\))?(!?): .*$/);
 const isValidConventionalCommitMessage = (message) => {
@@ -51,8 +55,9 @@ async function main() {
         const projectName = (0, core_1.getInput)('project_name', { required: true });
         const oasPath = (0, core_1.getInput)('oas_path', { required: true });
         const configPath = (0, core_1.getInput)('config_path', { required: false }) || undefined;
-        const oldOasHash = (0, core_1.getInput)('old_oas_hash', { required: false }) || undefined;
-        const oldConfigHash = (0, core_1.getInput)('old_config_hash', { required: false }) || undefined;
+        const parentOasHash = (0, core_1.getInput)('parent_oas_hash', { required: false }) || undefined;
+        const parentConfigHash = (0, core_1.getInput)('parent_config_hash', { required: false }) || undefined;
+        const parentBranch = (0, core_1.getInput)('parent_branch', { required: false }) || undefined;
         const branch = (0, core_1.getInput)('branch', { required: false }) || undefined;
         const commitMessage = (0, core_1.getInput)('commit_message', { required: false }) || undefined;
         const guessConfig = (0, core_1.getBooleanInput)('guess_config', { required: false });
@@ -64,8 +69,9 @@ async function main() {
         // attempt to find a parent build
         const recentBuilds = await stainless.builds.list({
             project: projectName,
-            spec_hash: oldOasHash,
-            config_hash: oldConfigHash,
+            spec_hash: parentOasHash,
+            config_hash: parentConfigHash,
+            branch: parentBranch,
             limit: 1,
         });
         const parentBuildId = recentBuilds[0]?.id || undefined;
@@ -75,14 +81,16 @@ async function main() {
         else {
             console.log("No parent build found.");
         }
+        const oasBuffer = fs.readFileSync(oasPath);
+        const configBuffer = configPath ? fs.readFileSync(configPath) : undefined;
         // create a new build
         const build = await stainless.builds.create({
             project: projectName,
-            oasSpec: new File([fs.readFileSync(oasPath)], path.basename(oasPath), {
+            oasSpec: new File([oasBuffer], path.basename(oasPath), {
                 type: 'text/plain',
                 lastModified: fs.statSync(oasPath).mtimeMs
             }),
-            stainlessConfig: configPath ? new File([fs.readFileSync(configPath)], path.basename(configPath), {
+            stainlessConfig: configPath && configBuffer ? new File([configBuffer], path.basename(configPath), {
                 type: 'text/plain',
                 lastModified: fs.statSync(configPath).mtimeMs
             }) : undefined,
@@ -91,7 +99,7 @@ async function main() {
             commitMessage,
             guessConfig
         }).asResponse();
-        const buildId = build.headers.get('X-Stainless-Project-Build-ID');
+        let buildId = build.headers.get('X-Stainless-Project-Build-ID');
         const languageHeader = build.headers.get('X-Stainless-Project-Build-Languages');
         const languages = (languageHeader?.length ? languageHeader.split(",") : []);
         if (buildId && languages.length > 0) {
@@ -99,12 +107,19 @@ async function main() {
         }
         else {
             if (!buildId) {
-                console.error("Missing build ID. Something went wrong.");
+                console.log(`No new build was created. Checking for existing builds with the inputs provided...`);
+                buildId = (await stainless.builds.list({
+                    project: projectName,
+                    spec_hash: crypto_1.default.createHash('md5').update(oasBuffer).digest('hex'),
+                    config_hash: configBuffer ? crypto_1.default.createHash('md5').update(configBuffer).digest('hex') : undefined,
+                    branch,
+                    limit: 1,
+                }))[0]?.id;
             }
-            if (languages.length === 0) {
-                console.error("No languages returned for this build. Something went wrong.");
+            if (!buildId) {
+                console.error("No existing build was found for this branch. Presumably it does not include SDK config changes");
+                process.exit(0);
             }
-            process.exit(1);
         }
         let parentOutcomes = {};
         let outcomes = {};
