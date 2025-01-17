@@ -35,19 +35,23 @@ async function main() {
       process.exit(1);
     }
 
-    // attempt to find a parent build
-    const recentBuilds = await stainless.builds.list({
-        project: projectName,
-        spec_hash: parentOasHash,
-        config_hash: parentConfigHash,
-        branch: parentBranch,
-        limit: 1,
-    });
-    const parentBuildId = recentBuilds[0]?.id || undefined;
-    if (parentBuildId) {
-      console.log("Found parent build:", parentBuildId);
-    } else {
-      console.log("No parent build found.");
+    let parentBuildId;
+
+    if (parentBranch) {
+      // attempt to find a parent build
+      const recentBuilds = await stainless.builds.list({
+          project: projectName,
+          spec_hash: parentOasHash,
+          config_hash: parentConfigHash,
+          branch: parentBranch,
+          limit: 1,
+      });
+      const parentBuildId = recentBuilds[0]?.id || undefined;
+      if (parentBuildId) {
+        console.log("Found parent build:", parentBuildId);
+      } else {
+        console.log("No parent build found.");
+      }
     }
 
     const oasBuffer = fs.readFileSync(oasPath);
