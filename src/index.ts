@@ -55,7 +55,7 @@ async function main() {
 
     // create a new build
     const build = await stainless.builds.create({
-      project: projectName,
+      projectName,
       oasSpec: new File(
         [oasBuffer],
         path.basename(oasPath),

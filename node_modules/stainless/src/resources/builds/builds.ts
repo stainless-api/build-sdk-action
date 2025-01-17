@@ -55,7 +55,7 @@ export interface BuildCreateParams {
   /**
    * The name of the project to create the build in
    */
-  project: string;
+  projectName: string;
 
   /**
    * The name of the Stainless branch to upload the spec to
