@@ -85,7 +85,7 @@ async function main() {
         const configBuffer = configPath ? fs.readFileSync(configPath) : undefined;
         // create a new build
         const build = await stainless.builds.create({
-            project: projectName,
+            projectName,
             oasSpec: new File([oasBuffer], path.basename(oasPath), {
                 type: 'text/plain',
                 lastModified: fs.statSync(oasPath).mtimeMs
