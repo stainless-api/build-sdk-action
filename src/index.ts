@@ -79,19 +79,25 @@ async function main() {
     }).asResponse();
     let buildId = build.headers.get('X-Stainless-Project-Build-ID');
     const languageHeader = build.headers.get('X-Stainless-Project-Build-Languages');
-    const languages = (languageHeader?.length ? languageHeader.split(",") : []) as Stainless.Builds.OutputRetrieveParams['target'][]
-    if (buildId && languages.length > 0) {
+    let languages = (languageHeader?.length ? languageHeader.split(",") : []) as Stainless.Builds.OutputRetrieveParams['target'][]
+    if (buildId) {
       console.log(`Created build with ID ${buildId} for languages: ${languages.join(", ")}`);
     } else {
       if (!buildId) {
         console.log(`No new build was created. Checking for existing builds with the inputs provided...`);
-        buildId = (await stainless.builds.list({
+        const build = (await stainless.builds.list({
           project: projectName,
           spec_hash: crypto.createHash('md5').update(oasBuffer).digest('hex'),
           config_hash: configBuffer ? crypto.createHash('md5').update(configBuffer).digest('hex') : undefined,
           branch,
           limit: 1,
-        }))[0]?.id;
+        }))[0];
+
+        if (build) {
+          buildId = build.id;
+          languages = build.targets;
+          console.log(`Found existing build with ID ${buildId} for languages: ${languages.join(", ")}`);
+        }
       }
 
       if (!buildId) {

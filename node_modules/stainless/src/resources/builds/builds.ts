@@ -40,6 +40,8 @@ export class Builds extends APIResource {
 
 export interface BuildResponse {
   id: string;
+
+  targets: Array<'node' | 'python' | 'go' | 'java' | 'kotlin' | 'ruby' | 'typescript'>;
 }
 
 export type BuildListResponse = Array<BuildResponse>;
