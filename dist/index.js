@@ -59,6 +59,7 @@ async function main() {
         const parentConfigHash = (0, core_1.getInput)('parent_config_hash', { required: false }) || undefined;
         const parentBranch = (0, core_1.getInput)('parent_branch', { required: false }) || undefined;
         const branch = (0, core_1.getInput)('branch', { required: false }) || undefined;
+        const mergeBranch = (0, core_1.getInput)('merge_branch', { required: false }) || undefined;
         const commitMessage = (0, core_1.getInput)('commit_message', { required: false }) || undefined;
         const guessConfig = (0, core_1.getBooleanInput)('guess_config', { required: false });
         const stainless = new stainless_1.Stainless({ apiKey: stainless_api_key });
@@ -99,6 +100,7 @@ async function main() {
             }) : undefined,
             parentBuildId,
             branch,
+            mergeBranch,
             commitMessage,
             guessConfig
         }).asResponse();
