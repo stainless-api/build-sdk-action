@@ -47,7 +47,7 @@ async function main() {
           branch: parentBranch,
           limit: 1,
       });
-      const parentBuildId = recentBuilds[0]?.id || undefined;
+      parentBuildId = recentBuilds[0]?.id || undefined;
       if (parentBuildId) {
         console.log("Found parent build:", parentBuildId);
       } else {
