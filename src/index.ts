@@ -25,6 +25,7 @@ async function main() {
     const parentConfigHash = getInput('parent_config_hash', { required: false }) || undefined;
     const parentBranch = getInput('parent_branch', { required: false }) || undefined;
     const branch = getInput('branch', { required: false }) || undefined;
+    const mergeBranch = getInput('merge_branch', { required: false }) || undefined;
     const commitMessage = getInput('commit_message', { required: false }) || undefined;
     const guessConfig = getBooleanInput('guess_config', { required: false });
 
@@ -78,6 +79,7 @@ async function main() {
       ) : undefined,
       parentBuildId,
       branch,
+      mergeBranch,
       commitMessage,
       guessConfig
     }).asResponse();
