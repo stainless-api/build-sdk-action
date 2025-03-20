@@ -1,5 +1,5 @@
 import { Stainless } from 'stainless';
-import { getBooleanInput, getInput } from '@actions/core';
+import { getBooleanInput, getInput, setOutput } from '@actions/core';
 import * as fs from 'fs';
 import * as path from 'path';
 import crypto from 'crypto';
@@ -29,7 +29,7 @@ async function main() {
     const commitMessage = getInput('commit_message', { required: false }) || undefined;
     const guessConfig = getBooleanInput('guess_config', { required: false });
 
-    const stainless = new Stainless({ apiKey: stainless_api_key });
+    const stainless = new Stainless({ apiKey: stainless_api_key, logLevel: 'warn' });
 
     if (commitMessage && !isValidConventionalCommitMessage(commitMessage)) {        
       console.error('Invalid commit message format. Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/');
@@ -152,14 +152,10 @@ async function main() {
       };
     }
 
-    // Save results to a file for the workflow to use
-    fs.writeFileSync('build_sdk_results.json', JSON.stringify({
-      outcomes,
-      parentOutcomes,
-    }, null, 2));
+    setOutput('results', {outcomes, parentOutcomes});
   } catch (error) {
     console.error("Error interacting with API:", error);
-    process.exit(1); // Fail the script if there's an error
+    process.exit(1);
   }
 }
 

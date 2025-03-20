@@ -62,7 +62,7 @@ async function main() {
         const mergeBranch = (0, core_1.getInput)('merge_branch', { required: false }) || undefined;
         const commitMessage = (0, core_1.getInput)('commit_message', { required: false }) || undefined;
         const guessConfig = (0, core_1.getBooleanInput)('guess_config', { required: false });
-        const stainless = new stainless_1.Stainless({ apiKey: stainless_api_key });
+        const stainless = new stainless_1.Stainless({ apiKey: stainless_api_key, logLevel: 'warn' });
         if (commitMessage && !(0, exports.isValidConventionalCommitMessage)(commitMessage)) {
             console.error('Invalid commit message format. Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/');
             process.exit(1);
@@ -168,15 +168,11 @@ async function main() {
                 conclusion: 'timed_out',
             };
         }
-        // Save results to a file for the workflow to use
-        fs.writeFileSync('build_sdk_results.json', JSON.stringify({
-            outcomes,
-            parentOutcomes,
-        }, null, 2));
+        (0, core_1.setOutput)('results', { outcomes, parentOutcomes });
     }
     catch (error) {
         console.error("Error interacting with API:", error);
-        process.exit(1); // Fail the script if there's an error
+        process.exit(1);
     }
 }
 main();
