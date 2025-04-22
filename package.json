@@ -16,6 +16,6 @@
   },
   "dependencies": {
     "@actions/core": "^1.11.1",
-    "stainless": "github:stainless-api/builds-node-api"
+    "stainless": "stainless-api/stainless-api-typescript#54866aa84f9bf8e27acfc948b94175975af61551"
   }
 }
