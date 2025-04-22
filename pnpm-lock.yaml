@@ -12,12 +12,15 @@ importers:
         specifier: ^1.11.1
         version: 1.11.1
       stainless:
-        specifier: github:stainless-api/builds-node-api
-        version: https://codeload.github.com/stainless-api/builds-node-api/tar.gz/ced99fbce365057ed2b03285d147175ef5fbbddb
+        specifier: stainless-api/stainless-api-typescript#54866aa84f9bf8e27acfc948b94175975af61551
+        version: stainless-v0@https://codeload.github.com/stainless-api/stainless-api-typescript/tar.gz/54866aa84f9bf8e27acfc948b94175975af61551
     devDependencies:
       '@types/node':
         specifier: ^22.10.6
         version: 22.13.10
+      '@vercel/ncc':
+        specifier: ^0.38.0
+        version: 0.38.3
       typescript:
         specifier: ^5.7.3
         version: 5.8.2
@@ -43,9 +46,13 @@ packages:
   '@types/node@22.13.10':
     resolution: {integrity: sha512-I6LPUvlRH+O6VRUqYOcMudhaIdUVWfsjnZavnsraHvpBwaEyMN29ry+0UVJhImYL16xsscu0aske3yA+uPOWfw==}
 
-  stainless@https://codeload.github.com/stainless-api/builds-node-api/tar.gz/ced99fbce365057ed2b03285d147175ef5fbbddb:
-    resolution: {tarball: https://codeload.github.com/stainless-api/builds-node-api/tar.gz/ced99fbce365057ed2b03285d147175ef5fbbddb}
-    version: 0.1.0-alpha.18
+  '@vercel/ncc@0.38.3':
+    resolution: {integrity: sha512-rnK6hJBS6mwc+Bkab+PGPs9OiS0i/3kdTO+CkI8V0/VrW3vmz7O2Pxjw/owOlmo6PKEIxRSeZKv/kuL9itnpYA==}
+    hasBin: true
+
+  stainless-v0@https://codeload.github.com/stainless-api/stainless-api-typescript/tar.gz/54866aa84f9bf8e27acfc948b94175975af61551:
+    resolution: {tarball: https://codeload.github.com/stainless-api/stainless-api-typescript/tar.gz/54866aa84f9bf8e27acfc948b94175975af61551}
+    version: 0.1.0-alpha.1
 
   tunnel@0.0.6:
     resolution: {integrity: sha512-1h/Lnq9yajKY2PEbBadPXj3VxsDDu844OnaAo52UVmIzIvwwtBPIuNvkjuzBlTWpfJyUbG3ez0KSBibQkj4ojg==}
@@ -87,7 +94,9 @@ snapshots:
     dependencies:
       undici-types: 6.20.0
 
-  stainless@https://codeload.github.com/stainless-api/builds-node-api/tar.gz/ced99fbce365057ed2b03285d147175ef5fbbddb: {}
+  '@vercel/ncc@0.38.3': {}
+
+  stainless-v0@https://codeload.github.com/stainless-api/stainless-api-typescript/tar.gz/54866aa84f9bf8e27acfc948b94175975af61551: {}
 
   tunnel@0.0.6: {}
 
