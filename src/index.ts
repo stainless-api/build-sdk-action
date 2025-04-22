@@ -120,11 +120,16 @@ async function main() {
     // If previous build on this branch is not against this revision, hard
     // reset the branch
     if (parentBuildId && branch) {
-      const previousBuild = (
-        await stainless.projects.branches.retrieve(branch, {
-          project: projectName,
-        })
-      )?.latest_build;
+      let previousBuild;
+      try {
+        previousBuild = (
+          await stainless.projects.branches.retrieve(branch, {
+            project: projectName,
+          })
+        )?.latest_build;
+      } catch {
+        // pass---branch probably doesn't exist
+      }
       if (previousBuild?.id) {
         console.log("Previous build against branch found:", previousBuild.id);
         if (previousBuild.id === parentBuildId) {
