@@ -1,0 +1,351 @@
+name: Build SDK
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - closed
+
+env:
+  OAS_PATH: {YOUR_SPEC_PATH}
+  CONFIG_PATH: {YOUR_CONFIG_PATH} # optional
+  STAINLESS_ORG_NAME: {YOUR_ORG_NAME}
+  STAINLESS_PROJECT_NAME: {YOUR_PROJECT_NAME}
+  FAIL_RUN_ON: "error" # "note" | "warning" | "error" | "fatal" | "never"
+
+jobs:
+  preview-sdk:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if either OAS or config is changed
+        id: config-changed
+        run: |
+          CHANGED_FILES=$(git diff --name-only "${GITHUB_SHA}^1" "${GITHUB_SHA}")
+          echo "Changed files: $CHANGED_FILES"
+
+          if echo "$CHANGED_FILES" | grep -q "${{ env.OAS_PATH }}"; then
+            echo "OAS file changed"
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -n "${{ env.CONFIG_PATH }}" ] && echo "$CHANGED_FILES" | grep -q "${{ env.CONFIG_PATH }}"; then
+            echo "Config file changed"
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get merge base
+        id: merge-base
+        if: steps.config-changed.outputs.changed == 'true'
+        run: |
+          BASE_SHA=$(git rev-parse "${GITHUB_SHA}^1")
+          echo "Merge base: $BASE_SHA"
+          echo "merge_base_sha=$BASE_SHA" >> $GITHUB_OUTPUT
+
+      - name: Compute MD5 hash of old OpenAPI spec and config
+        id: old-oas-hash
+        if: steps.config-changed.outputs.changed == 'true'
+        run: |
+          git checkout ${{ steps.merge-base.outputs.merge_base_sha }}
+
+          if [ -f "${{ env.OAS_PATH }}" ]; then
+            MD5_HASH=$(md5sum "${{ env.OAS_PATH }}" | awk '{ print $1 }')
+          else
+            echo "File ${{ env.OAS_PATH }} does not exist at merge base."
+            MD5_HASH=""
+          fi
+
+          echo "old_oas_hash=$MD5_HASH" >> $GITHUB_OUTPUT
+          echo "old_oas_hash=$MD5_HASH"
+
+          if [ -f "${{ env.CONFIG_PATH }}" ]; then
+            MD5_HASH_CONFIG=$(md5sum "${{ env.CONFIG_PATH }}" | awk '{ print $1 }')
+          else
+            echo "File ${{ env.CONFIG_PATH }} does not exist at merge base."
+            MD5_HASH_CONFIG=""
+          fi
+
+          echo "old_config_hash=$MD5_HASH_CONFIG" >> $GITHUB_OUTPUT
+          echo "old_config_hash=$MD5_HASH_CONFIG"
+
+          git checkout ${GITHUB_SHA}
+
+      - name: Build SDK
+        id: build-sdk
+        if: steps.config-changed.outputs.changed == 'true'
+        uses: stainless-api/build-sdk-action@d370a61982516ab4317ab75e4df2fbc11a5a0c8a
+        with:
+          stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
+          oas_path: ${{ env.OAS_PATH }}
+          config_path: ${{ env.CONFIG_PATH }}
+          project_name: ${{ env.STAINLESS_PROJECT_NAME }}
+          parent_oas_hash: ${{ steps.old-oas-hash.outputs.old_oas_hash }}
+          parent_config_hash: ${{ steps.old-oas-hash.outputs.old_config_hash }}
+          parent_branch: ${{ github.base_ref }}
+          branch: preview/${{ github.head_ref }}
+          guess_config: true
+
+      - name: Comment on Pull Request
+        if: steps.config-changed.outputs.changed == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const results = JSON.parse(`${{ steps.build-sdk.outputs.results }}`);
+            const outcomes = results.outcomes || {};
+            const parentOutcomes = results.parentOutcomes || {};
+
+            const generateRow = (lang, outcome, parentOutcome) => {
+              const studioUrl = `https://app.stainlessapi.com/${process.env.STAINLESS_ORG_NAME}/${process.env.STAINLESS_PROJECT_NAME}/studio?language=${lang}&branch=preview/${{ github.head_ref }}`;
+              let githubUrl;
+              let compareUrl;
+              let notes = '';
+
+              if (outcome.commit) {
+                const { owner, name, branch } = outcome.commit.repo;
+                githubUrl = `https://github.com/${owner}/${name}/tree/${branch}`;
+
+                if (parentOutcome?.commit) {
+                  const base = parentOutcome.commit.sha;
+                  const head = branch;
+                  compareUrl = `https://github.com/${owner}/${name}/compare/${base}..${head}`;
+                } else {
+                  if (parentOutcome) {
+                    notes = `Could not generate a diff link because the build's parent had conclusion: ${parentOutcome?.conclusion}`;
+                  } else {
+                    notes = `Could not generate a diff link because a parent build was not found`;
+                  }
+                }
+              } else if (outcome.merge_conflict_pr) {
+                const { number, repo: { owner, name } } = outcome.merge_conflict_pr;
+                const mergeConflictUrl = `https://github.com/${owner}/${name}/pull/${number}`;
+                const runUrl = `https://github.com/${context.payload.repository.full_name}/actions/runs/${context.runId}`;
+                if (outcome.conclusion === 'upstream_merge_conflict') {
+                  notes = `A preview could not be generated because there is a conflict on the parent branch. Please resolve the [conflict](${mergeConflictUrl}) then re-run the [workflow](${runUrl}).`;
+                } else {
+                  notes = `The build resulted in a merge conflict. Please resolve the [conflict](${mergeConflictUrl}) then re-run the [workflow](${runUrl}).`;
+                }
+              } else {
+                notes = `Could not generate a branch or diff link because the build had conclusion: ${outcome.conclusion}`;
+              }
+
+              const githubLink = githubUrl ? `[Branch](${githubUrl})` : '';
+              const studioLink = studioUrl ? `[Studio](${studioUrl})` : '';
+              const compareLink = compareUrl ? `[Diff](${compareUrl})` : '';
+
+              return `
+            | ${lang} | ${outcome.conclusion} | ${githubLink} | ${studioLink} | ${compareLink} | ${notes} |`;
+            };
+
+              const header = `
+            | Language | Conclusion | Branch | Studio | Diff | Notes |
+            |----------|------------|--------|--------|------|-------|`;
+
+              const tableRows = Object.keys(outcomes)
+                .map(lang => {
+                  const outcome = outcomes[lang];
+                  const parentOutcome = parentOutcomes[lang];
+                  return generateRow(lang, outcome, parentOutcome);
+                })
+                .join("");
+
+              const npmRepo = (outcomes['typescript'] ?? outcomes['node'])?.commit?.repo;
+              const npmInstallCommand = npmRepo ? `# ${outcomes['typescript'] ? 'typescript' : 'node'}
+            npm install "https://github.com/${npmRepo.owner}/${npmRepo.name}.git#${npmRepo.branch}"` : '';
+
+              const pythonRepo = outcomes['python']?.commit?.repo;
+              const pythonInstallCommand = pythonRepo ? `# python
+            pip install git+https://github.com/${pythonRepo.owner}/${pythonRepo.name}.git@${pythonRepo.branch}` : '';
+
+              const installation = npmInstallCommand || pythonInstallCommand ? `#### :package: Installation
+            ${[npmInstallCommand, pythonInstallCommand].filter(Boolean).map(cmd => `\`\`\`bash\n${cmd}\n\`\`\``).join('\n')}` : '';
+
+              const commentBody = `
+            ### :sparkles: SDK Previews
+            _Last updated: ${new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}_
+
+            The following table summarizes the build outcomes for all languages:
+
+            ${header}${tableRows}
+
+            You can freely modify the branches to add [custom code](https://app.stainlessapi.com/docs/guides/patch-custom-code).${installation ? `\n${installation}` : ''}
+              `;
+
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+              });
+
+              const existingComment = comments.find((comment) =>
+                comment.body.includes("### :sparkles: SDK Previews")
+              );
+
+              if (existingComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existingComment.id,
+                  body: commentBody,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  body: commentBody,
+                });
+              }
+
+      - name: Check results
+        if: steps.config-changed.outputs.changed == 'true'
+        run: |
+          FAIL_RUN_ON="${{ env.FAIL_RUN_ON }}"
+          [ "$FAIL_RUN_ON" = "never" ] && exit 0
+
+          FILTER=".value.commit == null"
+          [ "$FAIL_RUN_ON" = "error" -o "$FAIL_RUN_ON" = "warning" -o "$FAIL_RUN_ON" = "note" ] && FILTER="$FILTER or .value.conclusion == \"error\""
+          [ "$FAIL_RUN_ON" = "warning" -o "$FAIL_RUN_ON" = "note" ] && FILTER="$FILTER or .value.conclusion == \"warning\""
+          [ "$FAIL_RUN_ON" = "note" ] && FILTER="$FILTER or .value.conclusion == \"note\""
+
+          FAILED_LANGUAGES=$(echo '${{ steps.build-sdk.outputs.results }}' | jq -r ".outcomes | to_entries[] | select($FILTER) | .key")
+
+          if [ -n "$FAILED_LANGUAGES" ]; then
+            echo -e "\e[31mThe following languages did not build successfully: $FAILED_LANGUAGES\e[0m"
+            exit 1
+          fi
+
+  merge-sdk:
+    if: github.event.action == 'closed' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if either OAS or config is changed
+        id: config-changed
+        run: |
+          CHANGED_FILES=$(git diff --name-only "${GITHUB_SHA}^1" "${GITHUB_SHA}")
+          echo "Changed files: $CHANGED_FILES"
+
+          if echo "$CHANGED_FILES" | grep -q "${{ env.OAS_PATH }}"; then
+            echo "OAS file changed"
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -n "${{ env.CONFIG_PATH }}" ] && echo "$CHANGED_FILES" | grep -q "${{ env.CONFIG_PATH }}"; then
+            echo "Config file changed"
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build SDK
+        id: build-sdk
+        if: steps.config-changed.outputs.changed == 'true'
+        uses: stainless-api/build-sdk-action@d370a61982516ab4317ab75e4df2fbc11a5a0c8a
+        with:
+          stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
+          oas_path: ${{ env.OAS_PATH }}
+          config_path: ${{ env.CONFIG_PATH }}
+          project_name: ${{ env.STAINLESS_PROJECT_NAME }}
+          commit_message: ${{ github.event.pull_request.title }}
+          branch: main
+          merge_branch: preview/${{ github.head_ref }}
+          guess_config: false
+
+      - name: Comment on Pull Request
+        if: steps.config-changed.outputs.changed == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const results = JSON.parse(`${{ steps.build-sdk.outputs.results }}`);
+            const outcomes = results.outcomes || {};
+
+            const generateRow = (lang, outcome) => {
+              let githubUrl;
+              let studioUrl;
+
+              if (outcome.commit) {
+                const { owner, name, branch } = outcome.commit.repo;
+                studioUrl = `https://app.stainlessapi.com/${process.env.STAINLESS_ORG_NAME}/${process.env.STAINLESS_PROJECT_NAME}/studio?language=${lang}&branch=main`;
+              }
+
+              const studioLink = studioUrl ? `[Studio](${studioUrl})` : '';
+
+              return `
+            | ${lang} | ${outcome.conclusion} | ${studioLink} |`;
+            };
+
+              const header = `
+            | Language | Conclusion | Studio |
+            |----------|------------|--------|`;
+
+              const tableRows = Object.keys(outcomes)
+                .map(lang => {
+                  const outcome = outcomes[lang];
+                  return generateRow(lang, outcome);
+                })
+                .join("");
+
+              const commentBody = `
+            ### :rocket: SDK Build Status
+            The following table summarizes the build outcomes for all languages:
+
+            ${header}${tableRows}
+              `;
+
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+              });
+
+              const previewComment = comments.find((comment) =>
+                comment.body.includes("### :sparkles: SDK Previews")
+              );
+
+              if (previewComment) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: previewComment.id,
+                });
+              }
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody,
+              });
+
+      - name: Check results
+        if: steps.config-changed.outputs.changed == 'true'
+        run: |
+          FAIL_RUN_ON="${{ env.FAIL_RUN_ON }}"
+          [ "$FAIL_RUN_ON" = "never" ] && exit 0
+
+          FILTER=".value.commit == null"
+          [ "$FAIL_RUN_ON" = "error" -o "$FAIL_RUN_ON" = "warning" -o "$FAIL_RUN_ON" = "note" ] && FILTER="$FILTER or .value.conclusion == \"error\""
+          [ "$FAIL_RUN_ON" = "warning" -o "$FAIL_RUN_ON" = "note" ] && FILTER="$FILTER or .value.conclusion == \"warning\""
+          [ "$FAIL_RUN_ON" = "note" ] && FILTER="$FILTER or .value.conclusion == \"note\""
+
+          FAILED_LANGUAGES=$(echo '${{ steps.build-sdk.outputs.results }}' | jq -r ".outcomes | to_entries[] | select($FILTER) | .key")
+
+          if [ -n "$FAILED_LANGUAGES" ]; then
+            echo -e "\e[31mThe following languages did not build successfully: $FAILED_LANGUAGES\e[0m"
+            exit 1
+          fi
