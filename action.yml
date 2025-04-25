@@ -12,7 +12,7 @@ inputs:
     required: true
   oas_path:
     description: "Path to the OpenAPI file."
-    required: true
+    required: false
   config_path:
     description: "Path to the Stainless config file."
     required: false
@@ -23,7 +23,7 @@ inputs:
     description: "Commit message to use in the commits in the SDK repo."
     required: false
   guess_config:
-    description: "If true, renegerate the endpoints in the Stainless config file."
+    description: "If true, regenerate the endpoints in the Stainless config file."
     required: false
   branch:
     description: "Branch to create the build on."
@@ -31,13 +31,10 @@ inputs:
   merge_branch:
     description: "Branch that this build is merging in changes from."
     required: false
-  parent_oas_hash:
-    description: "The md5 hash of the OpenAPI file used to create the parent build."
+  parent_revision:
+    description: >-
+      JSON-stringified array of parent revisions. Each entry in the array must
+      be either a commit hash, or an object with keys as file names and values
+      as md5 hashes. The first matching revision that has a build will be the
+      build that this build is pushed onto.
     required: false
-  parent_config_hash:
-    description: "The md5 hash of the Stainless config file used to create the parent build."
-    required: false
-  parent_branch:
-    description: "The branch that the parent build was created on."
-    required: false
-
