@@ -9,10 +9,10 @@ on:
       - closed
 
 env:
-  OAS_PATH: {YOUR_SPEC_PATH}
-  CONFIG_PATH: {YOUR_CONFIG_PATH} # optional
-  STAINLESS_ORG_NAME: {YOUR_ORG_NAME}
-  STAINLESS_PROJECT_NAME: {YOUR_PROJECT_NAME}
+  OAS_PATH: { YOUR_SPEC_PATH }
+  CONFIG_PATH: { YOUR_CONFIG_PATH } # optional
+  STAINLESS_ORG_NAME: { YOUR_ORG_NAME }
+  STAINLESS_PROJECT_NAME: { YOUR_PROJECT_NAME }
   FAIL_RUN_ON: "error" # "note" | "warning" | "error" | "fatal" | "never"
 
 jobs:
@@ -28,10 +28,49 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Check if either OAS or config is changed
+      - name: Get possible parent SHAs
+        id: parent-commits
+        run: |
+          # In order, prefer pushing generated code onto:
+          # - a build on the commit right before the current PR's commit
+          # - a build on the commit that this PR will be merged into
+          # - a build that's happened on the branch that this PR will be merged into
+          # - a build against the main branch of this project
+
+          HEAD=${{ github.event.pull_request.head.sha }}
+
+          git fetch --depth=2 origin "${HEAD}" --depth=2
+          PARENT_SHA=$(git rev-parse "${HEAD}^1")
+
+          echo "Parent commit: $PARENT_SHA"
+          echo "parent_sha=$PARENT_SHA" >> $GITHUB_OUTPUT
+
+          BASE=${{ github.event.pull_request.base.sha }}
+
+          git fetch --depth=1 origin "${BASE}"
+          # deepen until we find merge base
+          while [ -z "$( git merge-base "${BASE}" "${HEAD}" )" ]; do
+            git fetch -q --deepen=10 origin "${BASE}" "${HEAD}";
+          done
+          MERGE_BASE_SHA=$(git merge-base "${HEAD}" "${BASE}")
+
+          echo "Merge base: $MERGE_BASE_SHA"
+          echo "merge_base_sha=$MERGE_BASE_SHA" >> $GITHUB_OUTPUT
+
+          BASE_REF=${{ github.base_ref }}
+
+          if [ "${BASE_REF}" != "${{ github.event.repository.default_branch }}" ]; then
+            echo "Non-main base ref: preview/$BASE_REF"
+            echo "base_ref=preview/$BASE_REF" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if either OAS or config is changed over merge base
         id: config-changed
         run: |
-          CHANGED_FILES=$(git diff --name-only "${GITHUB_SHA}^1" "${GITHUB_SHA}")
+          HEAD=${{ github.event.pull_request.head.sha }}
+          MERGE_BASE=${{ steps.parent-commits.outputs.merge_base_sha }}
+
+          CHANGED_FILES=$(git diff --name-only "${MERGE_BASE}" "${HEAD}")
           echo "Changed files: $CHANGED_FILES"
 
           if echo "$CHANGED_FILES" | grep -q "${{ env.OAS_PATH }}"; then
@@ -44,56 +83,85 @@ jobs:
             echo "changed=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Get merge base
-        id: merge-base
+      - name: Compute MD5 hashes of parent inputs
+        id: parent-input-hashes
         if: steps.config-changed.outputs.changed == 'true'
         run: |
-          BASE_SHA=$(git rev-parse "${GITHUB_SHA}^1")
-          echo "Merge base: $BASE_SHA"
-          echo "merge_base_sha=$BASE_SHA" >> $GITHUB_OUTPUT
+          PARENT_REVISION_ARGS=()
 
-      - name: Compute MD5 hash of old OpenAPI spec and config
-        id: old-oas-hash
-        if: steps.config-changed.outputs.changed == 'true'
-        run: |
-          git checkout ${{ steps.merge-base.outputs.merge_base_sha }}
+          git checkout ${{ steps.parent-commits.outputs.parent_sha }}
 
           if [ -f "${{ env.OAS_PATH }}" ]; then
-            MD5_HASH=$(md5sum "${{ env.OAS_PATH }}" | awk '{ print $1 }')
+            PARENT_OAS_HASH=$(md5sum "${{ env.OAS_PATH }}" | awk '{ print $1 }')
           else
-            echo "File ${{ env.OAS_PATH }} does not exist at merge base."
-            MD5_HASH=""
+            echo "File ${{ env.OAS_PATH }} does not exist at parent commit."
+            PARENT_OAS_HASH=""
           fi
-
-          echo "old_oas_hash=$MD5_HASH" >> $GITHUB_OUTPUT
-          echo "old_oas_hash=$MD5_HASH"
 
           if [ -f "${{ env.CONFIG_PATH }}" ]; then
-            MD5_HASH_CONFIG=$(md5sum "${{ env.CONFIG_PATH }}" | awk '{ print $1 }')
+            PARENT_CONFIG_HASH=$(md5sum "${{ env.CONFIG_PATH }}" | awk '{ print $1 }')
           else
-            echo "File ${{ env.CONFIG_PATH }} does not exist at merge base."
-            MD5_HASH_CONFIG=""
+            echo "File ${{ env.CONFIG_PATH }} does not exist at parent commit."
+            PARENT_CONFIG_HASH=""
           fi
 
-          echo "old_config_hash=$MD5_HASH_CONFIG" >> $GITHUB_OUTPUT
-          echo "old_config_hash=$MD5_HASH_CONFIG"
+          PARENT_HASHES=$(jq -nc \
+            --arg "openapi.yml" "$PARENT_OAS_HASH" \
+            --arg "openapi.stainless.yml" "$PARENT_CONFIG_HASH" \
+            '$ARGS.named'
+          )
 
-          git checkout ${GITHUB_SHA}
+          PARENT_REVISION_ARGS+=("$PARENT_HASHES")
+
+          git checkout ${{ steps.parent-commits.outputs.merge_base_sha }}
+
+          if [ -f "${{ env.OAS_PATH }}" ]; then
+            MERGE_BASE_OAS_HASH=$(md5sum "${{ env.OAS_PATH }}" | awk '{ print $1 }')
+          else
+            echo "File ${{ env.OAS_PATH }} does not exist at merge base."
+            MERGE_BASE_OAS_HASH=""
+          fi
+
+          if [ -f "${{ env.CONFIG_PATH }}" ]; then
+            MERGE_BASE_CONFIG_HASH=$(md5sum "${{ env.CONFIG_PATH }}" | awk '{ print $1 }')
+          else
+            echo "File ${{ env.CONFIG_PATH }} does not exist at merge base."
+            MERGE_BASE_CONFIG_HASH=""
+          fi
+
+          MERGE_BASE_HASHES=$(jq -nc \
+            --arg "openapi.yml" "$MERGE_BASE_OAS_HASH" \
+            --arg "openapi.stainless.yml" "$MERGE_BASE_CONFIG_HASH" \
+            '$ARGS.named'
+          )
+
+          PARENT_REVISION_ARGS+=("$MERGE_BASE_HASHES")
+
+          if [ -n "${{ steps.parent-commits.outputs.base_ref }}" ]; then
+            PARENT_REVISION_ARGS+=('"${{ steps.parent-commits.outputs.base_ref }}"')
+          fi
+
+          PARENT_REVISION_ARGS+=('"main"')
+
+          PARENT_REVISION=$(jq -nc '$ARGS.positional' --jsonargs "${PARENT_REVISION_ARGS[@]}")
+
+          echo "parent_revision=$PARENT_REVISION" >> $GITHUB_OUTPUT
+          echo "parent_revision=$PARENT_REVISION"
+
+          git checkout ${{ github.event.pull_request.head.sha }}
 
       - name: Build SDK
         id: build-sdk
         if: steps.config-changed.outputs.changed == 'true'
-        uses: stainless-api/build-sdk-action@d370a61982516ab4317ab75e4df2fbc11a5a0c8a
+        uses: stainless-api/build-sdk-action@790b29d4d0ad414cc2ad183567b625e021483524
         with:
           stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
           oas_path: ${{ env.OAS_PATH }}
           config_path: ${{ env.CONFIG_PATH }}
           project_name: ${{ env.STAINLESS_PROJECT_NAME }}
-          parent_oas_hash: ${{ steps.old-oas-hash.outputs.old_oas_hash }}
-          parent_config_hash: ${{ steps.old-oas-hash.outputs.old_config_hash }}
-          parent_branch: ${{ github.base_ref }}
+          parent_revision: ${{ steps.parent-input-hashes.outputs.parent_revision }}
           branch: preview/${{ github.head_ref }}
-          guess_config: true
+          guess_config: ${{ !env.CONFIG_PATH }}
 
       - name: Comment on Pull Request
         if: steps.config-changed.outputs.changed == 'true'
@@ -102,7 +170,9 @@ jobs:
           script: |
             const results = JSON.parse(`${{ steps.build-sdk.outputs.results }}`);
             const outcomes = results.outcomes || {};
-            const parentOutcomes = results.parentOutcomes || {};
+            // We want to diff the second parent outcome (which corresponds to the merge base),
+            // else the first outcome that exists.
+            const parentOutcomes = results.parentOutcomes[1] || results.parentOutcomes.find(Boolean) || {};
 
             const generateRow = (lang, outcome, parentOutcome) => {
               const studioUrl = `https://app.stainlessapi.com/${process.env.STAINLESS_ORG_NAME}/${process.env.STAINLESS_PROJECT_NAME}/studio?language=${lang}&branch=preview/${{ github.head_ref }}`;
@@ -252,19 +322,22 @@ jobs:
             echo "changed=true" >> $GITHUB_OUTPUT
           fi
 
+      # Note that this only merges in changes that happened on the last build on
+      # preview/${{ github.head_ref }}. It's possible that there are OAS/config
+      # changes that haven't been built, if the preview-sdk job didn't finish
+      # before this step starts. In theory we want to wait for all builds
+      # against preview/${{ github.head_ref }} to complete, but assuming that
+      # the preview-sdk job happens before the PR merge, it should be fine.
       - name: Build SDK
         id: build-sdk
         if: steps.config-changed.outputs.changed == 'true'
-        uses: stainless-api/build-sdk-action@d370a61982516ab4317ab75e4df2fbc11a5a0c8a
+        uses: stainless-api/build-sdk-action@790b29d4d0ad414cc2ad183567b625e021483524
         with:
           stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
-          oas_path: ${{ env.OAS_PATH }}
-          config_path: ${{ env.CONFIG_PATH }}
           project_name: ${{ env.STAINLESS_PROJECT_NAME }}
           commit_message: ${{ github.event.pull_request.title }}
           branch: main
           merge_branch: preview/${{ github.head_ref }}
-          guess_config: false
 
       - name: Comment on Pull Request
         if: steps.config-changed.outputs.changed == 'true'

@@ -4,8 +4,7 @@
   "description": "",
   "main": "dist/index.js",
   "scripts": {
-    "build": "ncc build src/index.ts --license licenses.txt",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "ncc build src/index.ts --license licenses.txt"
   },
   "keywords": [],
   "author": "",
@@ -17,7 +16,7 @@
   },
   "dependencies": {
     "@actions/core": "^1.11.1",
-    "stainless": "github:stainless-api/builds-node-api"
+    "stainless": "stainless-api/stainless-api-typescript#021eac6182c5f01bf9dd2c31f5277fa6cd159a1b"
   },
   "packageManager": "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c"
 }
