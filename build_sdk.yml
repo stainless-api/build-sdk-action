@@ -31,6 +31,12 @@ jobs:
       - name: Get possible parent SHAs
         id: parent-commits
         run: |
+          # In order, prefer pushing generated code onto:
+          # - a build on the commit right before the current PR's commit
+          # - a build on the commit that this PR will be merged into
+          # - a build that's happened on the branch that this PR will be merged into
+          # - a build against the main branch of this project
+
           HEAD=${{ github.event.pull_request.head.sha }}
 
           git fetch --depth=2 origin "${HEAD}" --depth=2
@@ -164,7 +170,7 @@ jobs:
           script: |
             const results = JSON.parse(`${{ steps.build-sdk.outputs.results }}`);
             const outcomes = results.outcomes || {};
-            // We want to diff the middle parent outcome (which corresponds to the merge base),
+            // We want to diff the second parent outcome (which corresponds to the merge base),
             // else the first outcome that exists.
             const parentOutcomes = results.parentOutcomes[1] || results.parentOutcomes.find(Boolean) || {};
 
@@ -316,19 +322,22 @@ jobs:
             echo "changed=true" >> $GITHUB_OUTPUT
           fi
 
+      # Note that this only merges in changes that happened on the last build on
+      # preview/${{ github.head_ref }}. It's possible that there are OAS/config
+      # changes that haven't been built, if the preview-sdk job didn't finish
+      # before this step starts. In theory we want to wait for all builds
+      # against preview/${{ github.head_ref }} to complete, but assuming that
+      # the preview-sdk job happens before the PR merge, it should be fine.
       - name: Build SDK
         id: build-sdk
         if: steps.config-changed.outputs.changed == 'true'
         uses: stainless-api/build-sdk-action@790b29d4d0ad414cc2ad183567b625e021483524
         with:
           stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
-          oas_path: ${{ env.OAS_PATH }}
-          config_path: ${{ env.CONFIG_PATH }}
           project_name: ${{ env.STAINLESS_PROJECT_NAME }}
           commit_message: ${{ github.event.pull_request.title }}
           branch: main
           merge_branch: preview/${{ github.head_ref }}
-          guess_config: false
 
       - name: Comment on Pull Request
         if: steps.config-changed.outputs.changed == 'true'
