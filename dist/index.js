@@ -25673,16 +25673,11 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.isValidConventionalCommitMessage = void 0;
 const stainless_1 = __nccwpck_require__(7863);
 const core_1 = __nccwpck_require__(7484);
 const fs = __importStar(__nccwpck_require__(9896));
-const path = __importStar(__nccwpck_require__(6928));
-const crypto_1 = __importDefault(__nccwpck_require__(6982));
 // https://www.conventionalcommits.org/en/v1.0.0/
 const CONVENTIONAL_COMMIT_REGEX = new RegExp(/^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\(.*\))?(!?): .*$/);
 const isValidConventionalCommitMessage = (message) => {
@@ -25692,124 +25687,199 @@ exports.isValidConventionalCommitMessage = isValidConventionalCommitMessage;
 const MAX_POLLING_SECONDS = 10 * 60; // 10 minutes
 async function main() {
     try {
-        const stainless_api_key = (0, core_1.getInput)('stainless_api_key', { required: true });
-        const projectName = (0, core_1.getInput)('project_name', { required: true });
-        const oasPath = (0, core_1.getInput)('oas_path', { required: true });
-        const configPath = (0, core_1.getInput)('config_path', { required: false }) || undefined;
-        const parentOasHash = (0, core_1.getInput)('parent_oas_hash', { required: false }) || undefined;
-        const parentConfigHash = (0, core_1.getInput)('parent_config_hash', { required: false }) || undefined;
-        const parentBranch = (0, core_1.getInput)('parent_branch', { required: false }) || undefined;
-        const branch = (0, core_1.getInput)('branch', { required: false }) || undefined;
-        const mergeBranch = (0, core_1.getInput)('merge_branch', { required: false }) || undefined;
-        const commitMessage = (0, core_1.getInput)('commit_message', { required: false }) || undefined;
-        const guessConfig = (0, core_1.getBooleanInput)('guess_config', { required: false });
-        const stainless = new stainless_1.Stainless({ apiKey: stainless_api_key, logLevel: 'warn' });
+        const apiKey = (0, core_1.getInput)("stainless_api_key", { required: true });
+        const oasPath = (0, core_1.getInput)("oas_path", { required: false }) || undefined;
+        const configPath = (0, core_1.getInput)("config_path", { required: false }) || undefined;
+        const projectName = (0, core_1.getInput)("project_name", { required: true });
+        const commitMessage = (0, core_1.getInput)("commit_message", { required: false }) || undefined;
+        const guessConfig = (0, core_1.getBooleanInput)("guess_config", { required: false });
+        const branch = (0, core_1.getInput)("branch", { required: false }) || undefined;
+        const mergeBranch = (0, core_1.getInput)("merge_branch", { required: false }) || undefined;
+        const parentRevisionRaw = (0, core_1.getInput)("parent_revision", { required: false }) || undefined;
+        if (mergeBranch && (oasPath || configPath)) {
+            throw new Error("Cannot specify both merge_branch and oas_path or config_path");
+        }
+        if (guessConfig && (configPath || !oasPath)) {
+            throw new Error("If guess_config is true, must have oas_path and no config_path");
+        }
+        const parentRevisionArray = (() => {
+            if (!parentRevisionRaw) {
+                return [];
+            }
+            const result = JSON.parse(parentRevisionRaw);
+            if (!Array.isArray(result)) {
+                throw new Error("parent_revision must be an array");
+            }
+            if (!result.every((x) => typeof x === "string" ||
+                (typeof x === "object" &&
+                    Object.entries(x).every(([key, value]) => typeof key === "string" && typeof value === "string")))) {
+                throw new Error("parent_revision must be an array of strings or objects with string keys and string values");
+            }
+            if (branch === "main" && result.length > 0) {
+                throw new Error("parent_revision must be empty when branch is 'main'");
+            }
+            return result;
+        })();
+        const stainless = new stainless_1.StainlessV0({ apiKey, logLevel: "warn" });
         if (commitMessage && !(0, exports.isValidConventionalCommitMessage)(commitMessage)) {
-            console.error('Invalid commit message format. Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/');
+            console.error("Invalid commit message format. Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/");
             process.exit(1);
         }
-        let parentBuildId;
-        if (parentBranch) {
-            // attempt to find a parent build
-            const recentBuilds = await stainless.builds.list({
+        // Find builds against parent revisions
+        const parentBuilds = await Promise.all(parentRevisionArray.map(async (parentRevision) => {
+            console.log("Searching for build against", parentRevision);
+            const parentBuild = (await stainless.builds.list({
                 project: projectName,
-                spec_hash: parentOasHash,
-                config_hash: parentConfigHash,
-                branch: parentBranch,
                 limit: 1,
-            });
-            parentBuildId = recentBuilds[0]?.id || undefined;
-            if (parentBuildId) {
-                console.log("Found parent build:", parentBuildId);
+                ...(typeof parentRevision === "string"
+                    ? { branch: parentRevision }
+                    : {
+                        revision: Object.fromEntries(Object.entries(parentRevision).map(([key, hash]) => [
+                            key,
+                            { hash },
+                        ])),
+                    }),
+            })).data[0];
+            return parentBuild ?? null;
+        }));
+        const parentBuild = parentBuilds.find(Boolean);
+        console.log("Parent builds found:", parentBuilds);
+        if (parentBuild) {
+            console.log("Using parent build:", parentBuild.id);
+        }
+        else {
+            console.log("No parent build found");
+        }
+        let oasContent = oasPath ? fs.readFileSync(oasPath, "utf8") : undefined;
+        let configContent = configPath
+            ? fs.readFileSync(configPath, "utf8")
+            : undefined;
+        // If previous build on this branch is not against this revision, hard
+        // reset the branch
+        if (parentBuild && branch) {
+            let previousBuild;
+            try {
+                previousBuild = (await stainless.projects.branches.retrieve(branch, {
+                    project: projectName,
+                }))?.latest_build;
             }
-            else {
-                console.log("No parent build found.");
+            catch (error) {
+                if (error instanceof stainless_1.StainlessV0.NotFoundError) {
+                    console.log("Branch not found, creating it against", parentBuild.config_commit);
+                    await stainless.projects.branches.create(projectName, {
+                        branch_from: parentBuild.config_commit,
+                        branch,
+                    });
+                }
+                else {
+                    throw error;
+                }
+            }
+            if (previousBuild?.id) {
+                console.log("Previous build against branch found:", previousBuild.id);
+                if (previousBuild.id === parentBuild.id) {
+                    console.log("Branch already up to date");
+                }
+                else {
+                    if (!configContent) {
+                        if (guessConfig) {
+                            console.log("Guessing config before branch reset");
+                            configContent = Object.values(await stainless.projects.configs.guess(projectName, {
+                                branch,
+                                spec: oasContent,
+                            }))[0]?.content;
+                        }
+                        else {
+                            console.log("Saving config before branch reset");
+                            configContent = Object.values(await stainless.projects.configs.retrieve(projectName, {
+                                branch,
+                            }))[0]?.content;
+                        }
+                    }
+                    console.log("Hard resetting branch", branch);
+                    await stainless.projects.branches.create(projectName, {
+                        branch_from: previousBuild.config_commit,
+                        branch,
+                    });
+                }
             }
         }
-        const oasBuffer = fs.readFileSync(oasPath);
-        const configBuffer = configPath ? fs.readFileSync(configPath) : undefined;
         // create a new build
         const build = await stainless.builds.create({
-            projectName,
-            oasSpec: new File([oasBuffer], path.basename(oasPath), {
-                type: 'text/plain',
-                lastModified: fs.statSync(oasPath).mtimeMs
-            }),
-            stainlessConfig: configPath && configBuffer ? new File([configBuffer], path.basename(configPath), {
-                type: 'text/plain',
-                lastModified: fs.statSync(configPath).mtimeMs
-            }) : undefined,
-            parentBuildId,
+            project: projectName,
+            revision: mergeBranch
+                ? `${branch}..${mergeBranch}`
+                : {
+                    ...(oasContent && {
+                        "openapi.yml": {
+                            content: oasContent,
+                        },
+                    }),
+                    ...(configContent && {
+                        "openapi.stainless.yml": {
+                            content: configContent,
+                        },
+                    }),
+                },
             branch,
-            mergeBranch,
-            commitMessage,
-            guessConfig
-        }).asResponse();
-        let buildId = build.headers.get('X-Stainless-Project-Build-ID');
-        const languageHeader = build.headers.get('X-Stainless-Project-Build-Languages');
-        let languages = (languageHeader?.length ? languageHeader.split(",") : []);
+            commit_message: commitMessage,
+        });
+        let buildId = build.id;
+        let languages = Object.keys(build.targets);
         if (buildId) {
             console.log(`Created build with ID ${buildId} for languages: ${languages.join(", ")}`);
         }
         else {
-            if (!buildId) {
-                console.log(`No new build was created. Checking for existing builds with the inputs provided...`);
-                const build = (await stainless.builds.list({
-                    project: projectName,
-                    spec_hash: crypto_1.default.createHash('md5').update(oasBuffer).digest('hex'),
-                    config_hash: configBuffer ? crypto_1.default.createHash('md5').update(configBuffer).digest('hex') : undefined,
-                    branch,
-                    limit: 1,
-                }))[0];
-                if (build) {
-                    buildId = build.id;
-                    languages = build.targets;
-                    console.log(`Found existing build with ID ${buildId} for languages: ${languages.join(", ")}`);
-                }
-            }
-            if (!buildId) {
-                console.error("No existing build was found for this branch. Presumably it does not include SDK config changes");
-                process.exit(0);
-            }
+            console.log(`No new build was created; exiting.`);
+            process.exit(0);
         }
-        let parentOutcomes = {};
+        let parentOutcomes = [];
         let outcomes = {};
         const pollingStart = Date.now();
-        while (Object.keys(outcomes).length < languages.length && Date.now() - pollingStart < MAX_POLLING_SECONDS * 1000) {
+        while (Object.keys(outcomes).length < languages.length &&
+            Date.now() - pollingStart < MAX_POLLING_SECONDS * 1000) {
             for (const language of languages) {
-                if (!(language in parentOutcomes) && parentBuildId) {
-                    const parentBuildOutput = await stainless.builds.outputs.retrieve(parentBuildId, { target: language });
-                    if (parentBuildOutput.commit.status === 'completed') {
-                        const parentOutcome = parentBuildOutput.commit.completed;
-                        console.log("Parent build completed with outcome:", JSON.stringify(parentOutcome));
-                        parentOutcomes[language] = parentOutcome;
+                for (const [i, parentBuild] of parentBuilds.entries()) {
+                    if (!parentOutcomes[i]) {
+                        parentOutcomes[i] = {};
                     }
-                    else {
-                        console.log(`Parent build has status ${parentBuildOutput.commit.status} for ${language}`);
+                    if (parentBuild && !(language in parentOutcomes[i])) {
+                        const parentBuildOutput = parentBuild.targets[language];
+                        if (parentBuildOutput?.commit.status === "completed") {
+                            const parentOutcome = parentBuildOutput?.commit;
+                            console.log(`Parent build ${i + 1} completed with outcome:`, JSON.stringify(parentOutcome));
+                            parentOutcomes[i][language] = parentOutcome.completed;
+                        }
+                        else {
+                            console.log(`Parent build ${i + 1} has status ${parentBuildOutput?.commit.status} for ${language}`);
+                        }
                     }
                 }
                 if (!(language in outcomes)) {
-                    const buildOutput = await stainless.builds.outputs.retrieve(buildId, { target: language });
-                    if (buildOutput.commit.status === 'completed') {
-                        const outcome = buildOutput.commit.completed;
+                    const buildOutput = (await stainless.builds.retrieve(buildId))
+                        .targets[language];
+                    if (buildOutput?.commit.status === "completed") {
+                        const outcome = buildOutput?.commit;
                         console.log("Build completed with outcome:", JSON.stringify(outcome));
-                        outcomes[language] = outcome;
+                        outcomes[language] = outcome.completed;
                     }
                     else {
-                        console.log(`Build has status ${buildOutput.commit.status} for ${language}`);
+                        console.log(`Build has status ${buildOutput?.commit.status} for ${language}`);
                     }
                 }
             }
             // wait a bit before polling again
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            await new Promise((resolve) => setTimeout(resolve, 5000));
         }
-        const languagesWithoutOutcome = languages.filter(language => !(language in outcomes));
+        const languagesWithoutOutcome = languages.filter((language) => !(language in outcomes));
         for (const language of languagesWithoutOutcome) {
             outcomes[language] = {
-                conclusion: 'timed_out',
+                conclusion: "timed_out",
+                commit: null,
+                merge_conflict_pr: null,
             };
         }
-        (0, core_1.setOutput)('results', { outcomes, parentOutcomes });
+        (0, core_1.setOutput)("results", { outcomes, parentOutcomes });
     }
     catch (error) {
         console.error("Error interacting with API:", error);
@@ -27686,7 +27756,482 @@ module.exports = parseParams
 
 /***/ }),
 
-/***/ 559:
+/***/ 5680:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __classPrivateFieldSet = (this && this.__classPrivateFieldSet) || function (receiver, state, value, kind, f) {
+    if (kind === "m") throw new TypeError("Private method is not writable");
+    if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
+    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
+    return (kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value)), value;
+};
+var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (receiver, state, kind, f) {
+    if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
+    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
+    return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
+};
+var _a, _StainlessV0_encoder;
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.StainlessV0 = void 0;
+const uuid_1 = __nccwpck_require__(2420);
+const values_1 = __nccwpck_require__(8925);
+const sleep_1 = __nccwpck_require__(7508);
+const log_1 = __nccwpck_require__(9377);
+const errors_1 = __nccwpck_require__(3922);
+const detect_platform_1 = __nccwpck_require__(5556);
+const Shims = __importStar(__nccwpck_require__(1511));
+const Opts = __importStar(__nccwpck_require__(4467));
+const qs = __importStar(__nccwpck_require__(6286));
+const version_1 = __nccwpck_require__(2759);
+const Errors = __importStar(__nccwpck_require__(37));
+const Uploads = __importStar(__nccwpck_require__(1205));
+const API = __importStar(__nccwpck_require__(4489));
+const api_promise_1 = __nccwpck_require__(4383);
+const headers_1 = __nccwpck_require__(5571);
+const build_target_outputs_1 = __nccwpck_require__(864);
+const builds_1 = __nccwpck_require__(4656);
+const env_1 = __nccwpck_require__(6728);
+const log_2 = __nccwpck_require__(9377);
+const values_2 = __nccwpck_require__(8925);
+const projects_1 = __nccwpck_require__(3636);
+/**
+ * API Client for interfacing with the Stainless V0 API.
+ */
+class StainlessV0 {
+    /**
+     * API Client for interfacing with the Stainless V0 API.
+     *
+     * @param {string | null | undefined} [opts.apiKey=process.env['STAINLESS_V0_API_KEY'] ?? null]
+     * @param {string} [opts.baseURL=process.env['STAINLESS_V0_BASE_URL'] ?? https://api.stainless.com] - Override the default base URL for the API.
+     * @param {number} [opts.timeout=1 minute] - The maximum amount of time (in milliseconds) the client will wait for a response before timing out.
+     * @param {MergedRequestInit} [opts.fetchOptions] - Additional `RequestInit` options to be passed to `fetch` calls.
+     * @param {Fetch} [opts.fetch] - Specify a custom `fetch` function implementation.
+     * @param {number} [opts.maxRetries=2] - The maximum number of times the client will retry a request.
+     * @param {HeadersLike} opts.defaultHeaders - Default headers to include with every request to the API.
+     * @param {Record<string, string | undefined>} opts.defaultQuery - Default query parameters to include with every request to the API.
+     */
+    constructor({ baseURL = (0, env_1.readEnv)('STAINLESS_V0_BASE_URL'), apiKey = (0, env_1.readEnv)('STAINLESS_V0_API_KEY') ?? null, ...opts } = {}) {
+        _StainlessV0_encoder.set(this, void 0);
+        this.projects = new API.Projects(this);
+        this.builds = new API.Builds(this);
+        this.buildTargetOutputs = new API.BuildTargetOutputs(this);
+        const options = {
+            apiKey,
+            ...opts,
+            baseURL: baseURL || `https://api.stainless.com`,
+        };
+        this.baseURL = options.baseURL;
+        this.timeout = options.timeout ?? StainlessV0.DEFAULT_TIMEOUT /* 1 minute */;
+        this.logger = options.logger ?? console;
+        const defaultLogLevel = 'warn';
+        // Set default logLevel early so that we can log a warning in parseLogLevel.
+        this.logLevel = defaultLogLevel;
+        this.logLevel =
+            (0, log_1.parseLogLevel)(options.logLevel, 'ClientOptions.logLevel', this) ??
+                (0, log_1.parseLogLevel)((0, env_1.readEnv)('STAINLESS_V0_LOG'), "process.env['STAINLESS_V0_LOG']", this) ??
+                defaultLogLevel;
+        this.fetchOptions = options.fetchOptions;
+        this.maxRetries = options.maxRetries ?? 2;
+        this.fetch = options.fetch ?? Shims.getDefaultFetch();
+        __classPrivateFieldSet(this, _StainlessV0_encoder, Opts.FallbackEncoder, "f");
+        this._options = options;
+        this.apiKey = apiKey;
+    }
+    defaultQuery() {
+        return this._options.defaultQuery;
+    }
+    validateHeaders({ values, nulls }) {
+        if (this.apiKey && values.get('authorization')) {
+            return;
+        }
+        if (nulls.has('authorization')) {
+            return;
+        }
+        throw new Error('Could not resolve authentication method. Expected the apiKey to be set. Or for the "Authorization" headers to be explicitly omitted');
+    }
+    authHeaders(opts) {
+        if (this.apiKey == null) {
+            return undefined;
+        }
+        return (0, headers_1.buildHeaders)([{ Authorization: `Bearer ${this.apiKey}` }]);
+    }
+    stringifyQuery(query) {
+        return qs.stringify(query, { arrayFormat: 'comma' });
+    }
+    getUserAgent() {
+        return `${this.constructor.name}/JS ${version_1.VERSION}`;
+    }
+    defaultIdempotencyKey() {
+        return `stainless-node-retry-${(0, uuid_1.uuid4)()}`;
+    }
+    makeStatusError(status, error, message, headers) {
+        return Errors.APIError.generate(status, error, message, headers);
+    }
+    buildURL(path, query) {
+        const url = (0, values_1.isAbsoluteURL)(path) ?
+            new URL(path)
+            : new URL(this.baseURL + (this.baseURL.endsWith('/') && path.startsWith('/') ? path.slice(1) : path));
+        const defaultQuery = this.defaultQuery();
+        if (!(0, values_2.isEmptyObj)(defaultQuery)) {
+            query = { ...defaultQuery, ...query };
+        }
+        if (typeof query === 'object' && query && !Array.isArray(query)) {
+            url.search = this.stringifyQuery(query);
+        }
+        return url.toString();
+    }
+    /**
+     * Used as a callback for mutating the given `FinalRequestOptions` object.
+     */
+    async prepareOptions(options) { }
+    /**
+     * Used as a callback for mutating the given `RequestInit` object.
+     *
+     * This is useful for cases where you want to add certain headers based off of
+     * the request properties, e.g. `method` or `url`.
+     */
+    async prepareRequest(request, { url, options }) { }
+    get(path, opts) {
+        return this.methodRequest('get', path, opts);
+    }
+    post(path, opts) {
+        return this.methodRequest('post', path, opts);
+    }
+    patch(path, opts) {
+        return this.methodRequest('patch', path, opts);
+    }
+    put(path, opts) {
+        return this.methodRequest('put', path, opts);
+    }
+    delete(path, opts) {
+        return this.methodRequest('delete', path, opts);
+    }
+    methodRequest(method, path, opts) {
+        return this.request(Promise.resolve(opts).then((opts) => {
+            return { method, path, ...opts };
+        }));
+    }
+    request(options, remainingRetries = null) {
+        return new api_promise_1.APIPromise(this, this.makeRequest(options, remainingRetries, undefined));
+    }
+    async makeRequest(optionsInput, retriesRemaining, retryOfRequestLogID) {
+        const options = await optionsInput;
+        const maxRetries = options.maxRetries ?? this.maxRetries;
+        if (retriesRemaining == null) {
+            retriesRemaining = maxRetries;
+        }
+        await this.prepareOptions(options);
+        const { req, url, timeout } = this.buildRequest(options, { retryCount: maxRetries - retriesRemaining });
+        await this.prepareRequest(req, { url, options });
+        /** Not an API request ID, just for correlating local log entries. */
+        const requestLogID = 'log_' + ((Math.random() * (1 << 24)) | 0).toString(16).padStart(6, '0');
+        const retryLogStr = retryOfRequestLogID === undefined ? '' : `, retryOf: ${retryOfRequestLogID}`;
+        const startTime = Date.now();
+        (0, log_2.loggerFor)(this).debug(`[${requestLogID}] sending request`, (0, log_2.formatRequestDetails)({
+            retryOfRequestLogID,
+            method: options.method,
+            url,
+            options,
+            headers: req.headers,
+        }));
+        if (options.signal?.aborted) {
+            throw new Errors.APIUserAbortError();
+        }
+        const controller = new AbortController();
+        const response = await this.fetchWithTimeout(url, req, timeout, controller).catch(errors_1.castToError);
+        const headersTime = Date.now();
+        if (response instanceof Error) {
+            const retryMessage = `retrying, ${retriesRemaining} attempts remaining`;
+            if (options.signal?.aborted) {
+                throw new Errors.APIUserAbortError();
+            }
+            // detect native connection timeout errors
+            // deno throws "TypeError: error sending request for url (https://example/): client error (Connect): tcp connect error: Operation timed out (os error 60): Operation timed out (os error 60)"
+            // undici throws "TypeError: fetch failed" with cause "ConnectTimeoutError: Connect Timeout Error (attempted address: example:443, timeout: 1ms)"
+            // others do not provide enough information to distinguish timeouts from other connection errors
+            const isTimeout = (0, errors_1.isAbortError)(response) ||
+                /timed? ?out/i.test(String(response) + ('cause' in response ? String(response.cause) : ''));
+            if (retriesRemaining) {
+                (0, log_2.loggerFor)(this).info(`[${requestLogID}] connection ${isTimeout ? 'timed out' : 'failed'} - ${retryMessage}`);
+                (0, log_2.loggerFor)(this).debug(`[${requestLogID}] connection ${isTimeout ? 'timed out' : 'failed'} (${retryMessage})`, (0, log_2.formatRequestDetails)({
+                    retryOfRequestLogID,
+                    url,
+                    durationMs: headersTime - startTime,
+                    message: response.message,
+                }));
+                return this.retryRequest(options, retriesRemaining, retryOfRequestLogID ?? requestLogID);
+            }
+            (0, log_2.loggerFor)(this).info(`[${requestLogID}] connection ${isTimeout ? 'timed out' : 'failed'} - error; no more retries left`);
+            (0, log_2.loggerFor)(this).debug(`[${requestLogID}] connection ${isTimeout ? 'timed out' : 'failed'} (error; no more retries left)`, (0, log_2.formatRequestDetails)({
+                retryOfRequestLogID,
+                url,
+                durationMs: headersTime - startTime,
+                message: response.message,
+            }));
+            if (isTimeout) {
+                throw new Errors.APIConnectionTimeoutError();
+            }
+            throw new Errors.APIConnectionError({ cause: response });
+        }
+        const responseInfo = `[${requestLogID}${retryLogStr}] ${req.method} ${url} ${response.ok ? 'succeeded' : 'failed'} with status ${response.status} in ${headersTime - startTime}ms`;
+        if (!response.ok) {
+            const shouldRetry = this.shouldRetry(response);
+            if (retriesRemaining && shouldRetry) {
+                const retryMessage = `retrying, ${retriesRemaining} attempts remaining`;
+                // We don't need the body of this response.
+                await Shims.CancelReadableStream(response.body);
+                (0, log_2.loggerFor)(this).info(`${responseInfo} - ${retryMessage}`);
+                (0, log_2.loggerFor)(this).debug(`[${requestLogID}] response error (${retryMessage})`, (0, log_2.formatRequestDetails)({
+                    retryOfRequestLogID,
+                    url: response.url,
+                    status: response.status,
+                    headers: response.headers,
+                    durationMs: headersTime - startTime,
+                }));
+                return this.retryRequest(options, retriesRemaining, retryOfRequestLogID ?? requestLogID, response.headers);
+            }
+            const retryMessage = shouldRetry ? `error; no more retries left` : `error; not retryable`;
+            (0, log_2.loggerFor)(this).info(`${responseInfo} - ${retryMessage}`);
+            const errText = await response.text().catch((err) => (0, errors_1.castToError)(err).message);
+            const errJSON = (0, values_1.safeJSON)(errText);
+            const errMessage = errJSON ? undefined : errText;
+            (0, log_2.loggerFor)(this).debug(`[${requestLogID}] response error (${retryMessage})`, (0, log_2.formatRequestDetails)({
+                retryOfRequestLogID,
+                url: response.url,
+                status: response.status,
+                headers: response.headers,
+                message: errMessage,
+                durationMs: Date.now() - startTime,
+            }));
+            const err = this.makeStatusError(response.status, errJSON, errMessage, response.headers);
+            throw err;
+        }
+        (0, log_2.loggerFor)(this).info(responseInfo);
+        (0, log_2.loggerFor)(this).debug(`[${requestLogID}] response start`, (0, log_2.formatRequestDetails)({
+            retryOfRequestLogID,
+            url: response.url,
+            status: response.status,
+            headers: response.headers,
+            durationMs: headersTime - startTime,
+        }));
+        return { response, options, controller, requestLogID, retryOfRequestLogID, startTime };
+    }
+    async fetchWithTimeout(url, init, ms, controller) {
+        const { signal, method, ...options } = init || {};
+        if (signal)
+            signal.addEventListener('abort', () => controller.abort());
+        const timeout = setTimeout(() => controller.abort(), ms);
+        const isReadableBody = (globalThis.ReadableStream && options.body instanceof globalThis.ReadableStream) ||
+            (typeof options.body === 'object' && options.body !== null && Symbol.asyncIterator in options.body);
+        const fetchOptions = {
+            signal: controller.signal,
+            ...(isReadableBody ? { duplex: 'half' } : {}),
+            method: 'GET',
+            ...options,
+        };
+        if (method) {
+            // Custom methods like 'patch' need to be uppercased
+            // See https://github.com/nodejs/undici/issues/2294
+            fetchOptions.method = method.toUpperCase();
+        }
+        return (
+        // use undefined this binding; fetch errors if bound to something else in browser/cloudflare
+        this.fetch.call(undefined, url, fetchOptions).finally(() => {
+            clearTimeout(timeout);
+        }));
+    }
+    shouldRetry(response) {
+        // Note this is not a standard header.
+        const shouldRetryHeader = response.headers.get('x-should-retry');
+        // If the server explicitly says whether or not to retry, obey.
+        if (shouldRetryHeader === 'true')
+            return true;
+        if (shouldRetryHeader === 'false')
+            return false;
+        // Retry on request timeouts.
+        if (response.status === 408)
+            return true;
+        // Retry on lock timeouts.
+        if (response.status === 409)
+            return true;
+        // Retry on rate limits.
+        if (response.status === 429)
+            return true;
+        // Retry internal errors.
+        if (response.status >= 500)
+            return true;
+        return false;
+    }
+    async retryRequest(options, retriesRemaining, requestLogID, responseHeaders) {
+        let timeoutMillis;
+        // Note the `retry-after-ms` header may not be standard, but is a good idea and we'd like proactive support for it.
+        const retryAfterMillisHeader = responseHeaders?.get('retry-after-ms');
+        if (retryAfterMillisHeader) {
+            const timeoutMs = parseFloat(retryAfterMillisHeader);
+            if (!Number.isNaN(timeoutMs)) {
+                timeoutMillis = timeoutMs;
+            }
+        }
+        // About the Retry-After header: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Retry-After
+        const retryAfterHeader = responseHeaders?.get('retry-after');
+        if (retryAfterHeader && !timeoutMillis) {
+            const timeoutSeconds = parseFloat(retryAfterHeader);
+            if (!Number.isNaN(timeoutSeconds)) {
+                timeoutMillis = timeoutSeconds * 1000;
+            }
+            else {
+                timeoutMillis = Date.parse(retryAfterHeader) - Date.now();
+            }
+        }
+        // If the API asks us to wait a certain amount of time (and it's a reasonable amount),
+        // just do what it says, but otherwise calculate a default
+        if (!(timeoutMillis && 0 <= timeoutMillis && timeoutMillis < 60 * 1000)) {
+            const maxRetries = options.maxRetries ?? this.maxRetries;
+            timeoutMillis = this.calculateDefaultRetryTimeoutMillis(retriesRemaining, maxRetries);
+        }
+        await (0, sleep_1.sleep)(timeoutMillis);
+        return this.makeRequest(options, retriesRemaining - 1, requestLogID);
+    }
+    calculateDefaultRetryTimeoutMillis(retriesRemaining, maxRetries) {
+        const initialRetryDelay = 0.5;
+        const maxRetryDelay = 8.0;
+        const numRetries = maxRetries - retriesRemaining;
+        // Apply exponential backoff, but not more than the max.
+        const sleepSeconds = Math.min(initialRetryDelay * Math.pow(2, numRetries), maxRetryDelay);
+        // Apply some jitter, take up to at most 25 percent of the retry time.
+        const jitter = 1 - Math.random() * 0.25;
+        return sleepSeconds * jitter * 1000;
+    }
+    buildRequest(inputOptions, { retryCount = 0 } = {}) {
+        const options = { ...inputOptions };
+        const { method, path, query } = options;
+        const url = this.buildURL(path, query);
+        if ('timeout' in options)
+            (0, values_1.validatePositiveInteger)('timeout', options.timeout);
+        options.timeout = options.timeout ?? this.timeout;
+        const { bodyHeaders, body } = this.buildBody({ options });
+        const reqHeaders = this.buildHeaders({ options: inputOptions, method, bodyHeaders, retryCount });
+        const req = {
+            method,
+            headers: reqHeaders,
+            ...(options.signal && { signal: options.signal }),
+            ...(globalThis.ReadableStream &&
+                body instanceof globalThis.ReadableStream && { duplex: 'half' }),
+            ...(body && { body }),
+            ...(this.fetchOptions ?? {}),
+            ...(options.fetchOptions ?? {}),
+        };
+        return { req, url, timeout: options.timeout };
+    }
+    buildHeaders({ options, method, bodyHeaders, retryCount, }) {
+        let idempotencyHeaders = {};
+        if (this.idempotencyHeader && method !== 'get') {
+            if (!options.idempotencyKey)
+                options.idempotencyKey = this.defaultIdempotencyKey();
+            idempotencyHeaders[this.idempotencyHeader] = options.idempotencyKey;
+        }
+        const headers = (0, headers_1.buildHeaders)([
+            idempotencyHeaders,
+            {
+                Accept: 'application/json',
+                'User-Agent': this.getUserAgent(),
+                'X-Stainless-Retry-Count': String(retryCount),
+                ...(options.timeout ? { 'X-Stainless-Timeout': String(Math.trunc(options.timeout / 1000)) } : {}),
+                ...(0, detect_platform_1.getPlatformHeaders)(),
+            },
+            this.authHeaders(options),
+            this._options.defaultHeaders,
+            bodyHeaders,
+            options.headers,
+        ]);
+        this.validateHeaders(headers);
+        return headers.values;
+    }
+    buildBody({ options: { body, headers: rawHeaders } }) {
+        if (!body) {
+            return { bodyHeaders: undefined, body: undefined };
+        }
+        const headers = (0, headers_1.buildHeaders)([rawHeaders]);
+        if (
+        // Pass raw type verbatim
+        ArrayBuffer.isView(body) ||
+            body instanceof ArrayBuffer ||
+            body instanceof DataView ||
+            (typeof body === 'string' &&
+                // Preserve legacy string encoding behavior for now
+                headers.values.has('content-type')) ||
+            // `Blob` is superset of `File`
+            body instanceof Blob ||
+            // `FormData` -> `multipart/form-data`
+            body instanceof FormData ||
+            // `URLSearchParams` -> `application/x-www-form-urlencoded`
+            body instanceof URLSearchParams ||
+            // Send chunked stream (each chunk has own `length`)
+            (globalThis.ReadableStream && body instanceof globalThis.ReadableStream)) {
+            return { bodyHeaders: undefined, body: body };
+        }
+        else if (typeof body === 'object' &&
+            (Symbol.asyncIterator in body ||
+                (Symbol.iterator in body && 'next' in body && typeof body.next === 'function'))) {
+            return { bodyHeaders: undefined, body: Shims.ReadableStreamFrom(body) };
+        }
+        else {
+            return __classPrivateFieldGet(this, _StainlessV0_encoder, "f").call(this, { body, headers });
+        }
+    }
+}
+exports.StainlessV0 = StainlessV0;
+_a = StainlessV0, _StainlessV0_encoder = new WeakMap();
+StainlessV0.StainlessV0 = _a;
+StainlessV0.DEFAULT_TIMEOUT = 60000; // 1 minute
+StainlessV0.StainlessV0Error = Errors.StainlessV0Error;
+StainlessV0.APIError = Errors.APIError;
+StainlessV0.APIConnectionError = Errors.APIConnectionError;
+StainlessV0.APIConnectionTimeoutError = Errors.APIConnectionTimeoutError;
+StainlessV0.APIUserAbortError = Errors.APIUserAbortError;
+StainlessV0.NotFoundError = Errors.NotFoundError;
+StainlessV0.ConflictError = Errors.ConflictError;
+StainlessV0.RateLimitError = Errors.RateLimitError;
+StainlessV0.BadRequestError = Errors.BadRequestError;
+StainlessV0.AuthenticationError = Errors.AuthenticationError;
+StainlessV0.InternalServerError = Errors.InternalServerError;
+StainlessV0.PermissionDeniedError = Errors.PermissionDeniedError;
+StainlessV0.UnprocessableEntityError = Errors.UnprocessableEntityError;
+StainlessV0.toFile = Uploads.toFile;
+StainlessV0.Projects = projects_1.Projects;
+StainlessV0.Builds = builds_1.Builds;
+StainlessV0.BuildTargetOutputs = build_target_outputs_1.BuildTargetOutputs;
+//# sourceMappingURL=client.js.map
+
+/***/ }),
+
+/***/ 4383:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -27777,483 +28322,19 @@ _APIPromise_client = new WeakMap();
 
 /***/ }),
 
-/***/ 5680:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
-var __classPrivateFieldSet = (this && this.__classPrivateFieldSet) || function (receiver, state, value, kind, f) {
-    if (kind === "m") throw new TypeError("Private method is not writable");
-    if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
-    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
-    return (kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value)), value;
-};
-var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (receiver, state, kind, f) {
-    if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
-    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
-    return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
-};
-var _a, _Stainless_encoder;
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Stainless = void 0;
-const uuid_1 = __nccwpck_require__(2420);
-const values_1 = __nccwpck_require__(8925);
-const sleep_1 = __nccwpck_require__(7508);
-const errors_1 = __nccwpck_require__(3922);
-const detect_platform_1 = __nccwpck_require__(5556);
-const Shims = __importStar(__nccwpck_require__(1511));
-const Opts = __importStar(__nccwpck_require__(4467));
-const version_1 = __nccwpck_require__(2759);
-const uploads_1 = __nccwpck_require__(3173);
-const headers_1 = __nccwpck_require__(5571);
-const Errors = __importStar(__nccwpck_require__(6549));
-const Uploads = __importStar(__nccwpck_require__(3173));
-const API = __importStar(__nccwpck_require__(4489));
-const api_promise_1 = __nccwpck_require__(559);
-const env_1 = __nccwpck_require__(6728);
-const log_1 = __nccwpck_require__(9377);
-const values_2 = __nccwpck_require__(8925);
-const builds_1 = __nccwpck_require__(7318);
-const safeJSON = (text) => {
-    try {
-        return JSON.parse(text);
-    }
-    catch (err) {
-        return undefined;
-    }
-};
-const isLogLevel = (key) => {
-    const levels = {
-        off: true,
-        error: true,
-        warn: true,
-        info: true,
-        debug: true,
-    };
-    return key in levels;
-};
-/**
- * API Client for interfacing with the Stainless API.
- */
-class Stainless {
-    /**
-     * API Client for interfacing with the Stainless API.
-     *
-     * @param {string | undefined} [opts.apiKey=process.env['API_KEY'] ?? undefined]
-     * @param {string} [opts.baseURL=process.env['STAINLESS_BASE_URL'] ?? https://api.stainlessapi.com] - Override the default base URL for the API.
-     * @param {number} [opts.timeout=1 minute] - The maximum amount of time (in milliseconds) the client will wait for a response before timing out.
-     * @param {number} [opts.httpAgent] - An HTTP agent used to manage HTTP(s) connections.
-     * @param {Fetch} [opts.fetch] - Specify a custom `fetch` function implementation.
-     * @param {number} [opts.maxRetries=2] - The maximum number of times the client will retry a request.
-     * @param {HeadersLike} opts.defaultHeaders - Default headers to include with every request to the API.
-     * @param {Record<string, string | undefined>} opts.defaultQuery - Default query parameters to include with every request to the API.
-     */
-    constructor({ baseURL = (0, env_1.readEnv)('STAINLESS_BASE_URL'), apiKey = (0, env_1.readEnv)('API_KEY'), ...opts } = {}) {
-        _Stainless_encoder.set(this, void 0);
-        this.builds = new API.Builds(this);
-        if (apiKey === undefined) {
-            throw new Errors.StainlessError("The API_KEY environment variable is missing or empty; either provide it, or instantiate the Stainless client with an apiKey option, like new Stainless({ apiKey: 'My API Key' }).");
-        }
-        const options = {
-            apiKey,
-            ...opts,
-            baseURL: baseURL || `https://api.stainlessapi.com`,
-        };
-        this.baseURL = options.baseURL;
-        this.timeout = options.timeout ?? Stainless.DEFAULT_TIMEOUT /* 1 minute */;
-        this.logger = options.logger ?? console;
-        if (options.logLevel != null) {
-            this.logLevel = options.logLevel;
-        }
-        else {
-            const envLevel = (0, env_1.readEnv)('STAINLESS_LOG');
-            if (isLogLevel(envLevel)) {
-                this.logLevel = envLevel;
-            }
-        }
-        this.httpAgent = options.httpAgent;
-        this.maxRetries = options.maxRetries ?? 2;
-        this.fetch = options.fetch ?? Shims.getDefaultFetch();
-        __classPrivateFieldSet(this, _Stainless_encoder, Opts.FallbackEncoder, "f");
-        this._options = options;
-        this.apiKey = apiKey;
-    }
-    defaultQuery() {
-        return this._options.defaultQuery;
-    }
-    validateHeaders({ values, nulls }) {
-        return;
-    }
-    authHeaders(opts) {
-        return new Headers({ Authorization: this.apiKey });
-    }
-    /**
-     * Basic re-implementation of `qs.stringify` for primitive types.
-     */
-    stringifyQuery(query) {
-        return Object.entries(query)
-            .filter(([_, value]) => typeof value !== 'undefined')
-            .map(([key, value]) => {
-            if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-                return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
-            }
-            if (value === null) {
-                return `${encodeURIComponent(key)}=`;
-            }
-            throw new Errors.StainlessError(`Cannot stringify type ${typeof value}; Expected string, number, boolean, or null. If you need to pass nested query parameters, you can manually encode them, e.g. { query: { 'foo[key1]': value1, 'foo[key2]': value2 } }, and please open a GitHub issue requesting better support for your use case.`);
-        })
-            .join('&');
-    }
-    getUserAgent() {
-        return `${this.constructor.name}/JS ${version_1.VERSION}`;
-    }
-    defaultIdempotencyKey() {
-        return `stainless-node-retry-${(0, uuid_1.uuid4)()}`;
-    }
-    makeStatusError(status, error, message, headers) {
-        return Errors.APIError.generate(status, error, message, headers);
-    }
-    buildURL(path, query) {
-        const url = (0, values_1.isAbsoluteURL)(path) ?
-            new URL(path)
-            : new URL(this.baseURL + (this.baseURL.endsWith('/') && path.startsWith('/') ? path.slice(1) : path));
-        const defaultQuery = this.defaultQuery();
-        if (!(0, values_2.isEmptyObj)(defaultQuery)) {
-            query = { ...defaultQuery, ...query };
-        }
-        if (typeof query === 'object' && query && !Array.isArray(query)) {
-            url.search = this.stringifyQuery(query);
-        }
-        return url.toString();
-    }
-    calculateContentLength(body) {
-        if (typeof body === 'string') {
-            if (typeof Buffer !== 'undefined') {
-                return Buffer.byteLength(body, 'utf8').toString();
-            }
-            if (typeof TextEncoder !== 'undefined') {
-                const encoder = new TextEncoder();
-                const encoded = encoder.encode(body);
-                return encoded.length.toString();
-            }
-        }
-        else if (ArrayBuffer.isView(body)) {
-            return body.byteLength.toString();
-        }
-        return null;
-    }
-    /**
-     * Used as a callback for mutating the given `FinalRequestOptions` object.
-     */
-    async prepareOptions(options) { }
-    /**
-     * Used as a callback for mutating the given `RequestInit` object.
-     *
-     * This is useful for cases where you want to add certain headers based off of
-     * the request properties, e.g. `method` or `url`.
-     */
-    async prepareRequest(request, { url, options }) { }
-    get(path, opts) {
-        return this.methodRequest('get', path, opts);
-    }
-    post(path, opts) {
-        return this.methodRequest('post', path, opts);
-    }
-    patch(path, opts) {
-        return this.methodRequest('patch', path, opts);
-    }
-    put(path, opts) {
-        return this.methodRequest('put', path, opts);
-    }
-    delete(path, opts) {
-        return this.methodRequest('delete', path, opts);
-    }
-    methodRequest(method, path, opts) {
-        return this.request(Promise.resolve(opts).then(async (opts) => {
-            const body = opts && (0, uploads_1.isBlobLike)(opts?.body) ? new DataView(await opts.body.arrayBuffer())
-                : opts?.body instanceof DataView ? opts.body
-                    : opts?.body instanceof ArrayBuffer ? new DataView(opts.body)
-                        : opts && ArrayBuffer.isView(opts?.body) ? new DataView(opts.body.buffer)
-                            : opts?.body;
-            return { method, path, ...opts, body };
-        }));
-    }
-    request(options, remainingRetries = null) {
-        return new api_promise_1.APIPromise(this, this.makeRequest(options, remainingRetries));
-    }
-    async makeRequest(optionsInput, retriesRemaining) {
-        const options = await optionsInput;
-        const maxRetries = options.maxRetries ?? this.maxRetries;
-        if (retriesRemaining == null) {
-            retriesRemaining = maxRetries;
-        }
-        await this.prepareOptions(options);
-        const { req, url, timeout } = this.buildRequest(options, { retryCount: maxRetries - retriesRemaining });
-        await this.prepareRequest(req, { url, options });
-        (0, log_1.logger)(this).debug('request', url, options, req.headers);
-        if (options.signal?.aborted) {
-            throw new Errors.APIUserAbortError();
-        }
-        const controller = new AbortController();
-        const response = await this.fetchWithTimeout(url, req, timeout, controller).catch(errors_1.castToError);
-        if (response instanceof Error) {
-            if (options.signal?.aborted) {
-                throw new Errors.APIUserAbortError();
-            }
-            if (retriesRemaining) {
-                return this.retryRequest(options, retriesRemaining);
-            }
-            if (response.name === 'AbortError') {
-                throw new Errors.APIConnectionTimeoutError();
-            }
-            throw new Errors.APIConnectionError({ cause: response });
-        }
-        if (!response.ok) {
-            if (retriesRemaining && this.shouldRetry(response)) {
-                const retryMessage = `retrying, ${retriesRemaining} attempts remaining`;
-                (0, log_1.logger)(this).debug(`response (error; ${retryMessage})`, response.status, url, response.headers);
-                return this.retryRequest(options, retriesRemaining, response.headers);
-            }
-            const errText = await response.text().catch((err) => (0, errors_1.castToError)(err).message);
-            const errJSON = safeJSON(errText);
-            const errMessage = errJSON ? undefined : errText;
-            const retryMessage = retriesRemaining ? `(error; no more retries left)` : `(error; not retryable)`;
-            (0, log_1.logger)(this).debug(`response (error; ${retryMessage})`, response.status, url, response.headers, errMessage);
-            const err = this.makeStatusError(response.status, errJSON, errMessage, response.headers);
-            throw err;
-        }
-        return { response, options, controller };
-    }
-    async fetchWithTimeout(url, init, ms, controller) {
-        const { signal, method, ...options } = init || {};
-        if (signal)
-            signal.addEventListener('abort', () => controller.abort());
-        const timeout = setTimeout(() => controller.abort(), ms);
-        const isReadableBody = Shims.isReadableLike(options.body);
-        const fetchOptions = {
-            signal: controller.signal,
-            ...(isReadableBody ? { duplex: 'half' } : {}),
-            method: 'GET',
-            ...options,
-        };
-        if (method) {
-            // Custom methods like 'patch' need to be uppercased
-            // See https://github.com/nodejs/undici/issues/2294
-            fetchOptions.method = method.toUpperCase();
-        }
-        return (
-        // use undefined this binding; fetch errors if bound to something else in browser/cloudflare
-        this.fetch.call(undefined, url, fetchOptions).finally(() => {
-            clearTimeout(timeout);
-        }));
-    }
-    shouldRetry(response) {
-        // Note this is not a standard header.
-        const shouldRetryHeader = response.headers.get('x-should-retry');
-        // If the server explicitly says whether or not to retry, obey.
-        if (shouldRetryHeader === 'true')
-            return true;
-        if (shouldRetryHeader === 'false')
-            return false;
-        // Retry on request timeouts.
-        if (response.status === 408)
-            return true;
-        // Retry on lock timeouts.
-        if (response.status === 409)
-            return true;
-        // Retry on rate limits.
-        if (response.status === 429)
-            return true;
-        // Retry internal errors.
-        if (response.status >= 500)
-            return true;
-        return false;
-    }
-    async retryRequest(options, retriesRemaining, responseHeaders) {
-        let timeoutMillis;
-        // Note the `retry-after-ms` header may not be standard, but is a good idea and we'd like proactive support for it.
-        const retryAfterMillisHeader = responseHeaders?.get('retry-after-ms');
-        if (retryAfterMillisHeader) {
-            const timeoutMs = parseFloat(retryAfterMillisHeader);
-            if (!Number.isNaN(timeoutMs)) {
-                timeoutMillis = timeoutMs;
-            }
-        }
-        // About the Retry-After header: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Retry-After
-        const retryAfterHeader = responseHeaders?.get('retry-after');
-        if (retryAfterHeader && !timeoutMillis) {
-            const timeoutSeconds = parseFloat(retryAfterHeader);
-            if (!Number.isNaN(timeoutSeconds)) {
-                timeoutMillis = timeoutSeconds * 1000;
-            }
-            else {
-                timeoutMillis = Date.parse(retryAfterHeader) - Date.now();
-            }
-        }
-        // If the API asks us to wait a certain amount of time (and it's a reasonable amount),
-        // just do what it says, but otherwise calculate a default
-        if (!(timeoutMillis && 0 <= timeoutMillis && timeoutMillis < 60 * 1000)) {
-            const maxRetries = options.maxRetries ?? this.maxRetries;
-            timeoutMillis = this.calculateDefaultRetryTimeoutMillis(retriesRemaining, maxRetries);
-        }
-        await (0, sleep_1.sleep)(timeoutMillis);
-        return this.makeRequest(options, retriesRemaining - 1);
-    }
-    calculateDefaultRetryTimeoutMillis(retriesRemaining, maxRetries) {
-        const initialRetryDelay = 0.5;
-        const maxRetryDelay = 8.0;
-        const numRetries = maxRetries - retriesRemaining;
-        // Apply exponential backoff, but not more than the max.
-        const sleepSeconds = Math.min(initialRetryDelay * Math.pow(2, numRetries), maxRetryDelay);
-        // Apply some jitter, take up to at most 25 percent of the retry time.
-        const jitter = 1 - Math.random() * 0.25;
-        return sleepSeconds * jitter * 1000;
-    }
-    buildRequest(options, { retryCount = 0 } = {}) {
-        const { method, path, query } = options;
-        const url = this.buildURL(path, query);
-        if ('timeout' in options)
-            (0, values_1.validatePositiveInteger)('timeout', options.timeout);
-        const timeout = options.timeout ?? this.timeout;
-        const httpAgent = options.httpAgent ?? this.httpAgent;
-        const minAgentTimeout = timeout + 1000;
-        if (typeof httpAgent?.options?.timeout === 'number' &&
-            minAgentTimeout > (httpAgent.options.timeout ?? 0)) {
-            // Allow any given request to bump our agent active socket timeout.
-            // This may seem strange, but leaking active sockets should be rare and not particularly problematic,
-            // and without mutating agent we would need to create more of them.
-            // This tradeoff optimizes for performance.
-            httpAgent.options.timeout = minAgentTimeout;
-        }
-        const { bodyHeaders, body } = this.buildBody({ options });
-        const reqHeaders = this.buildHeaders({ options, method, bodyHeaders, retryCount });
-        const req = {
-            method,
-            headers: reqHeaders,
-            ...(httpAgent && { agent: httpAgent }),
-            ...(options.signal && { signal: options.signal }),
-            ...(globalThis.ReadableStream &&
-                body instanceof globalThis.ReadableStream && { duplex: 'half' }),
-            ...(body && { body }),
-        };
-        return { req, url, timeout };
-    }
-    buildHeaders({ options, method, bodyHeaders, retryCount, }) {
-        let idempotencyHeaders = {};
-        if (this.idempotencyHeader && method !== 'get') {
-            if (!options.idempotencyKey)
-                options.idempotencyKey = this.defaultIdempotencyKey();
-            idempotencyHeaders[this.idempotencyHeader] = options.idempotencyKey;
-        }
-        const headers = (0, headers_1.buildHeaders)([
-            idempotencyHeaders,
-            {
-                Accept: 'application/json',
-                'User-Agent': this.getUserAgent(),
-                'X-Stainless-Retry-Count': String(retryCount),
-                ...(0, detect_platform_1.getPlatformHeaders)(),
-            },
-            this.authHeaders(options),
-            this._options.defaultHeaders,
-            bodyHeaders,
-            options.headers,
-        ]);
-        this.validateHeaders(headers);
-        return headers.values;
-    }
-    buildBody({ options: { body, headers: rawHeaders } }) {
-        if (!body) {
-            return { bodyHeaders: undefined, body: undefined };
-        }
-        const headers = (0, headers_1.buildHeaders)([rawHeaders]);
-        if (
-        // Pass raw type verbatim
-        ArrayBuffer.isView(body) ||
-            body instanceof ArrayBuffer ||
-            body instanceof DataView ||
-            (typeof body === 'string' &&
-                // Preserve legacy string encoding behavior for now
-                headers.values.has('content-type')) ||
-            // `Blob` is superset of `File`
-            body instanceof Blob ||
-            // `FormData` -> `multipart/form-data`
-            body instanceof FormData ||
-            // `URLSearchParams` -> `application/x-www-form-urlencoded`
-            body instanceof URLSearchParams ||
-            // Send chunked stream (each chunk has own `length`)
-            (globalThis.ReadableStream && body instanceof globalThis.ReadableStream)) {
-            return { bodyHeaders: undefined, body: body };
-        }
-        else if (typeof body === 'object' &&
-            (Symbol.asyncIterator in body ||
-                (Symbol.iterator in body && 'next' in body && typeof body.next === 'function'))) {
-            return { bodyHeaders: undefined, body: Shims.ReadableStreamFrom(body) };
-        }
-        else {
-            return __classPrivateFieldGet(this, _Stainless_encoder, "f").call(this, { body, headers });
-        }
-    }
-}
-exports.Stainless = Stainless;
-_a = Stainless, _Stainless_encoder = new WeakMap();
-Stainless.Stainless = _a;
-Stainless.DEFAULT_TIMEOUT = 60000; // 1 minute
-Stainless.StainlessError = Errors.StainlessError;
-Stainless.APIError = Errors.APIError;
-Stainless.APIConnectionError = Errors.APIConnectionError;
-Stainless.APIConnectionTimeoutError = Errors.APIConnectionTimeoutError;
-Stainless.APIUserAbortError = Errors.APIUserAbortError;
-Stainless.NotFoundError = Errors.NotFoundError;
-Stainless.ConflictError = Errors.ConflictError;
-Stainless.RateLimitError = Errors.RateLimitError;
-Stainless.BadRequestError = Errors.BadRequestError;
-Stainless.AuthenticationError = Errors.AuthenticationError;
-Stainless.InternalServerError = Errors.InternalServerError;
-Stainless.PermissionDeniedError = Errors.PermissionDeniedError;
-Stainless.UnprocessableEntityError = Errors.UnprocessableEntityError;
-Stainless.toFile = Uploads.toFile;
-Stainless.Builds = builds_1.Builds;
-//# sourceMappingURL=client.js.map
-
-/***/ }),
-
-/***/ 6549:
+/***/ 37:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.InternalServerError = exports.RateLimitError = exports.UnprocessableEntityError = exports.ConflictError = exports.NotFoundError = exports.PermissionDeniedError = exports.AuthenticationError = exports.BadRequestError = exports.APIConnectionTimeoutError = exports.APIConnectionError = exports.APIUserAbortError = exports.APIError = exports.StainlessError = void 0;
+exports.InternalServerError = exports.RateLimitError = exports.UnprocessableEntityError = exports.ConflictError = exports.NotFoundError = exports.PermissionDeniedError = exports.AuthenticationError = exports.BadRequestError = exports.APIConnectionTimeoutError = exports.APIConnectionError = exports.APIUserAbortError = exports.APIError = exports.StainlessV0Error = void 0;
 const errors_1 = __nccwpck_require__(3922);
-class StainlessError extends Error {
+class StainlessV0Error extends Error {
 }
-exports.StainlessError = StainlessError;
-class APIError extends StainlessError {
+exports.StainlessV0Error = StainlessV0Error;
+class APIError extends StainlessV0Error {
     constructor(status, error, message, headers) {
         super(`${APIError.makeMessage(status, error, message)}`);
         this.status = status;
@@ -28361,6 +28442,37 @@ exports.InternalServerError = InternalServerError;
 
 /***/ }),
 
+/***/ 3295:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.APIResource = void 0;
+class APIResource {
+    constructor(client) {
+        this._client = client;
+    }
+}
+exports.APIResource = APIResource;
+//# sourceMappingURL=resource.js.map
+
+/***/ }),
+
+/***/ 1205:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.toFile = void 0;
+var to_file_1 = __nccwpck_require__(8899);
+Object.defineProperty(exports, "toFile", ({ enumerable: true, get: function () { return to_file_1.toFile; } }));
+//# sourceMappingURL=uploads.js.map
+
+/***/ }),
+
 /***/ 7863:
 /***/ ((module, exports, __nccwpck_require__) => {
 
@@ -28371,20 +28483,17 @@ exports = module.exports = function (...args) {
   return new exports.default(...args)
 }
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.UnprocessableEntityError = exports.PermissionDeniedError = exports.InternalServerError = exports.AuthenticationError = exports.BadRequestError = exports.RateLimitError = exports.ConflictError = exports.NotFoundError = exports.APIUserAbortError = exports.APIConnectionTimeoutError = exports.APIConnectionError = exports.APIError = exports.StainlessError = exports.Stainless = exports.APIPromise = exports.toFile = exports.createForm = exports.maybeMultipartFormRequestOptions = exports.multipartFormRequestOptions = exports["default"] = void 0;
+exports.UnprocessableEntityError = exports.PermissionDeniedError = exports.InternalServerError = exports.AuthenticationError = exports.BadRequestError = exports.RateLimitError = exports.ConflictError = exports.NotFoundError = exports.APIUserAbortError = exports.APIConnectionTimeoutError = exports.APIConnectionError = exports.APIError = exports.StainlessV0Error = exports.StainlessV0 = exports.APIPromise = exports.toFile = exports["default"] = void 0;
 var client_1 = __nccwpck_require__(5680);
-Object.defineProperty(exports, "default", ({ enumerable: true, get: function () { return client_1.Stainless; } }));
-var uploads_1 = __nccwpck_require__(3173);
-Object.defineProperty(exports, "multipartFormRequestOptions", ({ enumerable: true, get: function () { return uploads_1.multipartFormRequestOptions; } }));
-Object.defineProperty(exports, "maybeMultipartFormRequestOptions", ({ enumerable: true, get: function () { return uploads_1.maybeMultipartFormRequestOptions; } }));
-Object.defineProperty(exports, "createForm", ({ enumerable: true, get: function () { return uploads_1.createForm; } }));
+Object.defineProperty(exports, "default", ({ enumerable: true, get: function () { return client_1.StainlessV0; } }));
+var uploads_1 = __nccwpck_require__(1205);
 Object.defineProperty(exports, "toFile", ({ enumerable: true, get: function () { return uploads_1.toFile; } }));
-var api_promise_1 = __nccwpck_require__(559);
+var api_promise_1 = __nccwpck_require__(4383);
 Object.defineProperty(exports, "APIPromise", ({ enumerable: true, get: function () { return api_promise_1.APIPromise; } }));
 var client_2 = __nccwpck_require__(5680);
-Object.defineProperty(exports, "Stainless", ({ enumerable: true, get: function () { return client_2.Stainless; } }));
-var error_1 = __nccwpck_require__(6549);
-Object.defineProperty(exports, "StainlessError", ({ enumerable: true, get: function () { return error_1.StainlessError; } }));
+Object.defineProperty(exports, "StainlessV0", ({ enumerable: true, get: function () { return client_2.StainlessV0; } }));
+var error_1 = __nccwpck_require__(37);
+Object.defineProperty(exports, "StainlessV0Error", ({ enumerable: true, get: function () { return error_1.StainlessV0Error; } }));
 Object.defineProperty(exports, "APIError", ({ enumerable: true, get: function () { return error_1.APIError; } }));
 Object.defineProperty(exports, "APIConnectionError", ({ enumerable: true, get: function () { return error_1.APIConnectionError; } }));
 Object.defineProperty(exports, "APIConnectionTimeoutError", ({ enumerable: true, get: function () { return error_1.APIConnectionTimeoutError; } }));
@@ -28430,7 +28539,7 @@ function getDetectedPlatform() {
     if (typeof EdgeRuntime !== 'undefined') {
         return 'edge';
     }
-    if (Object.prototype.toString.call(typeof process !== 'undefined' ? process : 0) === '[object process]') {
+    if (Object.prototype.toString.call(typeof globalThis.process !== 'undefined' ? globalThis.process : 0) === '[object process]') {
         return 'node';
     }
     return 'unknown';
@@ -28454,7 +28563,7 @@ const getPlatformProperties = () => {
             'X-Stainless-OS': 'Unknown',
             'X-Stainless-Arch': `other:${EdgeRuntime}`,
             'X-Stainless-Runtime': 'edge',
-            'X-Stainless-Runtime-Version': process.version,
+            'X-Stainless-Runtime-Version': globalThis.process.version,
         };
     }
     // Check if Node.js
@@ -28462,10 +28571,10 @@ const getPlatformProperties = () => {
         return {
             'X-Stainless-Lang': 'js',
             'X-Stainless-Package-Version': version_1.VERSION,
-            'X-Stainless-OS': normalizePlatform(process.platform),
-            'X-Stainless-Arch': normalizeArch(process.arch),
+            'X-Stainless-OS': normalizePlatform(globalThis.process.platform),
+            'X-Stainless-Arch': normalizeArch(globalThis.process.arch),
             'X-Stainless-Runtime': 'node',
-            'X-Stainless-Runtime-Version': process.version,
+            'X-Stainless-Runtime-Version': globalThis.process.version,
         };
     }
     const browserInfo = getBrowserInfo();
@@ -28579,14 +28688,33 @@ exports.getPlatformHeaders = getPlatformHeaders;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.castToError = exports.isAbortError = void 0;
 function isAbortError(err) {
-    return ((err instanceof Error && err.name === 'AbortError') ||
-        (typeof err === 'object' && err && 'name' in err && err.name === 'AbortError'));
+    return (typeof err === 'object' &&
+        err !== null &&
+        // Spec-compliant fetch implementations
+        (('name' in err && err.name === 'AbortError') ||
+            // Expo fetch
+            ('message' in err && String(err.message).includes('FetchRequestCanceledException'))));
 }
 exports.isAbortError = isAbortError;
 const castToError = (err) => {
     if (err instanceof Error)
         return err;
     if (typeof err === 'object' && err !== null) {
+        try {
+            if (Object.prototype.toString.call(err) === '[object Error]') {
+                // @ts-ignore - not all envs have native support for cause yet
+                const error = new Error(err.message, err.cause ? { cause: err.cause } : {});
+                if (err.stack)
+                    error.stack = err.stack;
+                // @ts-ignore - not all envs have native support for cause yet
+                if (err.cause && !error.cause)
+                    error.cause = err.cause;
+                if (err.name)
+                    error.name = err.name;
+                return error;
+            }
+        }
+        catch { }
         try {
             return new Error(JSON.stringify(err));
         }
@@ -28693,106 +28821,609 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.defaultParseResponse = void 0;
 const log_1 = __nccwpck_require__(9377);
 async function defaultParseResponse(client, props) {
-    const { response } = props;
-    // fetch refuses to read the body when the status code is 204.
-    if (response.status === 204) {
-        return null;
-    }
-    if (props.options.__binaryResponse) {
-        return response;
-    }
-    const contentType = response.headers.get('content-type');
-    const isJSON = contentType?.includes('application/json') || contentType?.includes('application/vnd.api+json');
-    if (isJSON) {
-        const json = await response.json();
-        (0, log_1.logger)(client).debug('response', response.status, response.url, response.headers, json);
-        return json;
-    }
-    const text = await response.text();
-    (0, log_1.logger)(client).debug('response', response.status, response.url, response.headers, text);
-    // TODO handle blob, arraybuffer, other content types, etc.
-    return text;
+    const { response, requestLogID, retryOfRequestLogID, startTime } = props;
+    const body = await (async () => {
+        // fetch refuses to read the body when the status code is 204.
+        if (response.status === 204) {
+            return null;
+        }
+        if (props.options.__binaryResponse) {
+            return response;
+        }
+        const contentType = response.headers.get('content-type');
+        const mediaType = contentType?.split(';')[0]?.trim();
+        const isJSON = mediaType?.includes('application/json') || mediaType?.endsWith('+json');
+        if (isJSON) {
+            const json = await response.json();
+            return json;
+        }
+        const text = await response.text();
+        return text;
+    })();
+    (0, log_1.loggerFor)(client).debug(`[${requestLogID}] response parsed`, (0, log_1.formatRequestDetails)({
+        retryOfRequestLogID,
+        url: response.url,
+        status: response.status,
+        body,
+        durationMs: Date.now() - startTime,
+    }));
+    return body;
 }
 exports.defaultParseResponse = defaultParseResponse;
 //# sourceMappingURL=parse.js.map
 
 /***/ }),
 
-/***/ 7472:
+/***/ 7834:
 /***/ ((__unused_webpack_module, exports) => {
 
-if (true) {
-  if (globalThis.crypto) {
-    exports.crypto = globalThis.crypto;
-  } else {
-    try {
-      // Use [require][0](...) and not require(...) so bundlers don't try to bundle the
-      // crypto module.
-      exports.crypto = [require][0]('node:crypto').webcrypto;
-    } catch (e) {}
-  }
-}
+"use strict";
 
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.RFC3986 = exports.RFC1738 = exports.formatters = exports.default_format = void 0;
+exports.default_format = 'RFC3986';
+exports.formatters = {
+    RFC1738: (v) => String(v).replace(/%20/g, '+'),
+    RFC3986: (v) => String(v),
+};
+exports.RFC1738 = 'RFC1738';
+exports.RFC3986 = 'RFC3986';
+//# sourceMappingURL=formats.js.map
 
 /***/ }),
 
-/***/ 6877:
-/***/ (() => {
+/***/ 6286:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
-/**
- * This file polyfills the global `File` object for you if it's not already defined
- * when running on Node.js
- *
- * This is only needed on Node.js v18 & v19. Newer versions already define `File`
- * as a global.
- */
+"use strict";
 
-if (true) {
-  if (!globalThis.File) {
-    try {
-      // Use [require][0](...) and not require(...) so bundlers don't try to bundle the
-      // buffer module.
-      globalThis.File = [require][0]('node:buffer').File;
-    } catch (e) {}
-  }
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.formats = exports.stringify = void 0;
+const formats_1 = __nccwpck_require__(7834);
+const formats = {
+    formatters: formats_1.formatters,
+    RFC1738: formats_1.RFC1738,
+    RFC3986: formats_1.RFC3986,
+    default: formats_1.default_format,
+};
+exports.formats = formats;
+var stringify_1 = __nccwpck_require__(7907);
+Object.defineProperty(exports, "stringify", ({ enumerable: true, get: function () { return stringify_1.stringify; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 7907:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.stringify = void 0;
+const utils_1 = __nccwpck_require__(6207);
+const formats_1 = __nccwpck_require__(7834);
+const has = Object.prototype.hasOwnProperty;
+const array_prefix_generators = {
+    brackets(prefix) {
+        return String(prefix) + '[]';
+    },
+    comma: 'comma',
+    indices(prefix, key) {
+        return String(prefix) + '[' + key + ']';
+    },
+    repeat(prefix) {
+        return String(prefix);
+    },
+};
+const is_array = Array.isArray;
+const push = Array.prototype.push;
+const push_to_array = function (arr, value_or_array) {
+    push.apply(arr, is_array(value_or_array) ? value_or_array : [value_or_array]);
+};
+const to_ISO = Date.prototype.toISOString;
+const defaults = {
+    addQueryPrefix: false,
+    allowDots: false,
+    allowEmptyArrays: false,
+    arrayFormat: 'indices',
+    charset: 'utf-8',
+    charsetSentinel: false,
+    delimiter: '&',
+    encode: true,
+    encodeDotInKeys: false,
+    encoder: utils_1.encode,
+    encodeValuesOnly: false,
+    format: formats_1.default_format,
+    formatter: formats_1.formatters[formats_1.default_format],
+    /** @deprecated */
+    indices: false,
+    serializeDate(date) {
+        return to_ISO.call(date);
+    },
+    skipNulls: false,
+    strictNullHandling: false,
+};
+function is_non_nullish_primitive(v) {
+    return (typeof v === 'string' ||
+        typeof v === 'number' ||
+        typeof v === 'boolean' ||
+        typeof v === 'symbol' ||
+        typeof v === 'bigint');
 }
+const sentinel = {};
+function inner_stringify(object, prefix, generateArrayPrefix, commaRoundTrip, allowEmptyArrays, strictNullHandling, skipNulls, encodeDotInKeys, encoder, filter, sort, allowDots, serializeDate, format, formatter, encodeValuesOnly, charset, sideChannel) {
+    let obj = object;
+    let tmp_sc = sideChannel;
+    let step = 0;
+    let find_flag = false;
+    while ((tmp_sc = tmp_sc.get(sentinel)) !== void undefined && !find_flag) {
+        // Where object last appeared in the ref tree
+        const pos = tmp_sc.get(object);
+        step += 1;
+        if (typeof pos !== 'undefined') {
+            if (pos === step) {
+                throw new RangeError('Cyclic object value');
+            }
+            else {
+                find_flag = true; // Break while
+            }
+        }
+        if (typeof tmp_sc.get(sentinel) === 'undefined') {
+            step = 0;
+        }
+    }
+    if (typeof filter === 'function') {
+        obj = filter(prefix, obj);
+    }
+    else if (obj instanceof Date) {
+        obj = serializeDate?.(obj);
+    }
+    else if (generateArrayPrefix === 'comma' && is_array(obj)) {
+        obj = (0, utils_1.maybe_map)(obj, function (value) {
+            if (value instanceof Date) {
+                return serializeDate?.(value);
+            }
+            return value;
+        });
+    }
+    if (obj === null) {
+        if (strictNullHandling) {
+            return encoder && !encodeValuesOnly ?
+                // @ts-expect-error
+                encoder(prefix, defaults.encoder, charset, 'key', format)
+                : prefix;
+        }
+        obj = '';
+    }
+    if (is_non_nullish_primitive(obj) || (0, utils_1.is_buffer)(obj)) {
+        if (encoder) {
+            const key_value = encodeValuesOnly ? prefix
+                // @ts-expect-error
+                : encoder(prefix, defaults.encoder, charset, 'key', format);
+            return [
+                formatter?.(key_value) +
+                    '=' +
+                    // @ts-expect-error
+                    formatter?.(encoder(obj, defaults.encoder, charset, 'value', format)),
+            ];
+        }
+        return [formatter?.(prefix) + '=' + formatter?.(String(obj))];
+    }
+    const values = [];
+    if (typeof obj === 'undefined') {
+        return values;
+    }
+    let obj_keys;
+    if (generateArrayPrefix === 'comma' && is_array(obj)) {
+        // we need to join elements in
+        if (encodeValuesOnly && encoder) {
+            // @ts-expect-error values only
+            obj = (0, utils_1.maybe_map)(obj, encoder);
+        }
+        obj_keys = [{ value: obj.length > 0 ? obj.join(',') || null : void undefined }];
+    }
+    else if (is_array(filter)) {
+        obj_keys = filter;
+    }
+    else {
+        const keys = Object.keys(obj);
+        obj_keys = sort ? keys.sort(sort) : keys;
+    }
+    const encoded_prefix = encodeDotInKeys ? String(prefix).replace(/\./g, '%2E') : String(prefix);
+    const adjusted_prefix = commaRoundTrip && is_array(obj) && obj.length === 1 ? encoded_prefix + '[]' : encoded_prefix;
+    if (allowEmptyArrays && is_array(obj) && obj.length === 0) {
+        return adjusted_prefix + '[]';
+    }
+    for (let j = 0; j < obj_keys.length; ++j) {
+        const key = obj_keys[j];
+        const value = 
+        // @ts-ignore
+        typeof key === 'object' && typeof key.value !== 'undefined' ? key.value : obj[key];
+        if (skipNulls && value === null) {
+            continue;
+        }
+        // @ts-ignore
+        const encoded_key = allowDots && encodeDotInKeys ? key.replace(/\./g, '%2E') : key;
+        const key_prefix = is_array(obj) ?
+            typeof generateArrayPrefix === 'function' ?
+                generateArrayPrefix(adjusted_prefix, encoded_key)
+                : adjusted_prefix
+            : adjusted_prefix + (allowDots ? '.' + encoded_key : '[' + encoded_key + ']');
+        sideChannel.set(object, step);
+        const valueSideChannel = new WeakMap();
+        valueSideChannel.set(sentinel, sideChannel);
+        push_to_array(values, inner_stringify(value, key_prefix, generateArrayPrefix, commaRoundTrip, allowEmptyArrays, strictNullHandling, skipNulls, encodeDotInKeys, 
+        // @ts-ignore
+        generateArrayPrefix === 'comma' && encodeValuesOnly && is_array(obj) ? null : encoder, filter, sort, allowDots, serializeDate, format, formatter, encodeValuesOnly, charset, valueSideChannel));
+    }
+    return values;
+}
+function normalize_stringify_options(opts = defaults) {
+    if (typeof opts.allowEmptyArrays !== 'undefined' && typeof opts.allowEmptyArrays !== 'boolean') {
+        throw new TypeError('`allowEmptyArrays` option can only be `true` or `false`, when provided');
+    }
+    if (typeof opts.encodeDotInKeys !== 'undefined' && typeof opts.encodeDotInKeys !== 'boolean') {
+        throw new TypeError('`encodeDotInKeys` option can only be `true` or `false`, when provided');
+    }
+    if (opts.encoder !== null && typeof opts.encoder !== 'undefined' && typeof opts.encoder !== 'function') {
+        throw new TypeError('Encoder has to be a function.');
+    }
+    const charset = opts.charset || defaults.charset;
+    if (typeof opts.charset !== 'undefined' && opts.charset !== 'utf-8' && opts.charset !== 'iso-8859-1') {
+        throw new TypeError('The charset option must be either utf-8, iso-8859-1, or undefined');
+    }
+    let format = formats_1.default_format;
+    if (typeof opts.format !== 'undefined') {
+        if (!has.call(formats_1.formatters, opts.format)) {
+            throw new TypeError('Unknown format option provided.');
+        }
+        format = opts.format;
+    }
+    const formatter = formats_1.formatters[format];
+    let filter = defaults.filter;
+    if (typeof opts.filter === 'function' || is_array(opts.filter)) {
+        filter = opts.filter;
+    }
+    let arrayFormat;
+    if (opts.arrayFormat && opts.arrayFormat in array_prefix_generators) {
+        arrayFormat = opts.arrayFormat;
+    }
+    else if ('indices' in opts) {
+        arrayFormat = opts.indices ? 'indices' : 'repeat';
+    }
+    else {
+        arrayFormat = defaults.arrayFormat;
+    }
+    if ('commaRoundTrip' in opts && typeof opts.commaRoundTrip !== 'boolean') {
+        throw new TypeError('`commaRoundTrip` must be a boolean, or absent');
+    }
+    const allowDots = typeof opts.allowDots === 'undefined' ?
+        !!opts.encodeDotInKeys === true ?
+            true
+            : defaults.allowDots
+        : !!opts.allowDots;
+    return {
+        addQueryPrefix: typeof opts.addQueryPrefix === 'boolean' ? opts.addQueryPrefix : defaults.addQueryPrefix,
+        // @ts-ignore
+        allowDots: allowDots,
+        allowEmptyArrays: typeof opts.allowEmptyArrays === 'boolean' ? !!opts.allowEmptyArrays : defaults.allowEmptyArrays,
+        arrayFormat: arrayFormat,
+        charset: charset,
+        charsetSentinel: typeof opts.charsetSentinel === 'boolean' ? opts.charsetSentinel : defaults.charsetSentinel,
+        commaRoundTrip: !!opts.commaRoundTrip,
+        delimiter: typeof opts.delimiter === 'undefined' ? defaults.delimiter : opts.delimiter,
+        encode: typeof opts.encode === 'boolean' ? opts.encode : defaults.encode,
+        encodeDotInKeys: typeof opts.encodeDotInKeys === 'boolean' ? opts.encodeDotInKeys : defaults.encodeDotInKeys,
+        encoder: typeof opts.encoder === 'function' ? opts.encoder : defaults.encoder,
+        encodeValuesOnly: typeof opts.encodeValuesOnly === 'boolean' ? opts.encodeValuesOnly : defaults.encodeValuesOnly,
+        filter: filter,
+        format: format,
+        formatter: formatter,
+        serializeDate: typeof opts.serializeDate === 'function' ? opts.serializeDate : defaults.serializeDate,
+        skipNulls: typeof opts.skipNulls === 'boolean' ? opts.skipNulls : defaults.skipNulls,
+        // @ts-ignore
+        sort: typeof opts.sort === 'function' ? opts.sort : null,
+        strictNullHandling: typeof opts.strictNullHandling === 'boolean' ? opts.strictNullHandling : defaults.strictNullHandling,
+    };
+}
+function stringify(object, opts = {}) {
+    let obj = object;
+    const options = normalize_stringify_options(opts);
+    let obj_keys;
+    let filter;
+    if (typeof options.filter === 'function') {
+        filter = options.filter;
+        obj = filter('', obj);
+    }
+    else if (is_array(options.filter)) {
+        filter = options.filter;
+        obj_keys = filter;
+    }
+    const keys = [];
+    if (typeof obj !== 'object' || obj === null) {
+        return '';
+    }
+    const generateArrayPrefix = array_prefix_generators[options.arrayFormat];
+    const commaRoundTrip = generateArrayPrefix === 'comma' && options.commaRoundTrip;
+    if (!obj_keys) {
+        obj_keys = Object.keys(obj);
+    }
+    if (options.sort) {
+        obj_keys.sort(options.sort);
+    }
+    const sideChannel = new WeakMap();
+    for (let i = 0; i < obj_keys.length; ++i) {
+        const key = obj_keys[i];
+        if (options.skipNulls && obj[key] === null) {
+            continue;
+        }
+        push_to_array(keys, inner_stringify(obj[key], key, 
+        // @ts-expect-error
+        generateArrayPrefix, commaRoundTrip, options.allowEmptyArrays, options.strictNullHandling, options.skipNulls, options.encodeDotInKeys, options.encode ? options.encoder : null, options.filter, options.sort, options.allowDots, options.serializeDate, options.format, options.formatter, options.encodeValuesOnly, options.charset, sideChannel));
+    }
+    const joined = keys.join(options.delimiter);
+    let prefix = options.addQueryPrefix === true ? '?' : '';
+    if (options.charsetSentinel) {
+        if (options.charset === 'iso-8859-1') {
+            // encodeURIComponent('&#10003;'), the "numeric entity" representation of a checkmark
+            prefix += 'utf8=%26%2310003%3B&';
+        }
+        else {
+            // encodeURIComponent('✓')
+            prefix += 'utf8=%E2%9C%93&';
+        }
+    }
+    return joined.length > 0 ? prefix + joined : '';
+}
+exports.stringify = stringify;
+//# sourceMappingURL=stringify.js.map
 
+/***/ }),
+
+/***/ 6207:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.maybe_map = exports.combine = exports.is_buffer = exports.is_regexp = exports.compact = exports.encode = exports.decode = exports.assign_single_source = exports.merge = void 0;
+const formats_1 = __nccwpck_require__(7834);
+const has = Object.prototype.hasOwnProperty;
+const is_array = Array.isArray;
+const hex_table = (() => {
+    const array = [];
+    for (let i = 0; i < 256; ++i) {
+        array.push('%' + ((i < 16 ? '0' : '') + i.toString(16)).toUpperCase());
+    }
+    return array;
+})();
+function compact_queue(queue) {
+    while (queue.length > 1) {
+        const item = queue.pop();
+        if (!item)
+            continue;
+        const obj = item.obj[item.prop];
+        if (is_array(obj)) {
+            const compacted = [];
+            for (let j = 0; j < obj.length; ++j) {
+                if (typeof obj[j] !== 'undefined') {
+                    compacted.push(obj[j]);
+                }
+            }
+            // @ts-ignore
+            item.obj[item.prop] = compacted;
+        }
+    }
+}
+function array_to_object(source, options) {
+    const obj = options && options.plainObjects ? Object.create(null) : {};
+    for (let i = 0; i < source.length; ++i) {
+        if (typeof source[i] !== 'undefined') {
+            obj[i] = source[i];
+        }
+    }
+    return obj;
+}
+function merge(target, source, options = {}) {
+    if (!source) {
+        return target;
+    }
+    if (typeof source !== 'object') {
+        if (is_array(target)) {
+            target.push(source);
+        }
+        else if (target && typeof target === 'object') {
+            if ((options && (options.plainObjects || options.allowPrototypes)) ||
+                !has.call(Object.prototype, source)) {
+                target[source] = true;
+            }
+        }
+        else {
+            return [target, source];
+        }
+        return target;
+    }
+    if (!target || typeof target !== 'object') {
+        return [target].concat(source);
+    }
+    let mergeTarget = target;
+    if (is_array(target) && !is_array(source)) {
+        // @ts-ignore
+        mergeTarget = array_to_object(target, options);
+    }
+    if (is_array(target) && is_array(source)) {
+        source.forEach(function (item, i) {
+            if (has.call(target, i)) {
+                const targetItem = target[i];
+                if (targetItem && typeof targetItem === 'object' && item && typeof item === 'object') {
+                    target[i] = merge(targetItem, item, options);
+                }
+                else {
+                    target.push(item);
+                }
+            }
+            else {
+                target[i] = item;
+            }
+        });
+        return target;
+    }
+    return Object.keys(source).reduce(function (acc, key) {
+        const value = source[key];
+        if (has.call(acc, key)) {
+            acc[key] = merge(acc[key], value, options);
+        }
+        else {
+            acc[key] = value;
+        }
+        return acc;
+    }, mergeTarget);
+}
+exports.merge = merge;
+function assign_single_source(target, source) {
+    return Object.keys(source).reduce(function (acc, key) {
+        acc[key] = source[key];
+        return acc;
+    }, target);
+}
+exports.assign_single_source = assign_single_source;
+function decode(str, _, charset) {
+    const strWithoutPlus = str.replace(/\+/g, ' ');
+    if (charset === 'iso-8859-1') {
+        // unescape never throws, no try...catch needed:
+        return strWithoutPlus.replace(/%[0-9a-f]{2}/gi, unescape);
+    }
+    // utf-8
+    try {
+        return decodeURIComponent(strWithoutPlus);
+    }
+    catch (e) {
+        return strWithoutPlus;
+    }
+}
+exports.decode = decode;
+const limit = 1024;
+const encode = (str, _defaultEncoder, charset, _kind, format) => {
+    // This code was originally written by Brian White for the io.js core querystring library.
+    // It has been adapted here for stricter adherence to RFC 3986
+    if (str.length === 0) {
+        return str;
+    }
+    let string = str;
+    if (typeof str === 'symbol') {
+        string = Symbol.prototype.toString.call(str);
+    }
+    else if (typeof str !== 'string') {
+        string = String(str);
+    }
+    if (charset === 'iso-8859-1') {
+        return escape(string).replace(/%u[0-9a-f]{4}/gi, function ($0) {
+            return '%26%23' + parseInt($0.slice(2), 16) + '%3B';
+        });
+    }
+    let out = '';
+    for (let j = 0; j < string.length; j += limit) {
+        const segment = string.length >= limit ? string.slice(j, j + limit) : string;
+        const arr = [];
+        for (let i = 0; i < segment.length; ++i) {
+            let c = segment.charCodeAt(i);
+            if (c === 0x2d || // -
+                c === 0x2e || // .
+                c === 0x5f || // _
+                c === 0x7e || // ~
+                (c >= 0x30 && c <= 0x39) || // 0-9
+                (c >= 0x41 && c <= 0x5a) || // a-z
+                (c >= 0x61 && c <= 0x7a) || // A-Z
+                (format === formats_1.RFC1738 && (c === 0x28 || c === 0x29)) // ( )
+            ) {
+                arr[arr.length] = segment.charAt(i);
+                continue;
+            }
+            if (c < 0x80) {
+                arr[arr.length] = hex_table[c];
+                continue;
+            }
+            if (c < 0x800) {
+                arr[arr.length] = hex_table[0xc0 | (c >> 6)] + hex_table[0x80 | (c & 0x3f)];
+                continue;
+            }
+            if (c < 0xd800 || c >= 0xe000) {
+                arr[arr.length] =
+                    hex_table[0xe0 | (c >> 12)] + hex_table[0x80 | ((c >> 6) & 0x3f)] + hex_table[0x80 | (c & 0x3f)];
+                continue;
+            }
+            i += 1;
+            c = 0x10000 + (((c & 0x3ff) << 10) | (segment.charCodeAt(i) & 0x3ff));
+            arr[arr.length] =
+                hex_table[0xf0 | (c >> 18)] +
+                    hex_table[0x80 | ((c >> 12) & 0x3f)] +
+                    hex_table[0x80 | ((c >> 6) & 0x3f)] +
+                    hex_table[0x80 | (c & 0x3f)];
+        }
+        out += arr.join('');
+    }
+    return out;
+};
+exports.encode = encode;
+function compact(value) {
+    const queue = [{ obj: { o: value }, prop: 'o' }];
+    const refs = [];
+    for (let i = 0; i < queue.length; ++i) {
+        const item = queue[i];
+        // @ts-ignore
+        const obj = item.obj[item.prop];
+        const keys = Object.keys(obj);
+        for (let j = 0; j < keys.length; ++j) {
+            const key = keys[j];
+            const val = obj[key];
+            if (typeof val === 'object' && val !== null && refs.indexOf(val) === -1) {
+                queue.push({ obj: obj, prop: key });
+                refs.push(val);
+            }
+        }
+    }
+    compact_queue(queue);
+    return value;
+}
+exports.compact = compact;
+function is_regexp(obj) {
+    return Object.prototype.toString.call(obj) === '[object RegExp]';
+}
+exports.is_regexp = is_regexp;
+function is_buffer(obj) {
+    if (!obj || typeof obj !== 'object') {
+        return false;
+    }
+    return !!(obj.constructor && obj.constructor.isBuffer && obj.constructor.isBuffer(obj));
+}
+exports.is_buffer = is_buffer;
+function combine(a, b) {
+    return [].concat(a, b);
+}
+exports.combine = combine;
+function maybe_map(val, fn) {
+    if (is_array(val)) {
+        const mapped = [];
+        for (let i = 0; i < val.length; i += 1) {
+            mapped.push(fn(val[i]));
+        }
+        return mapped;
+    }
+    return fn(val);
+}
+exports.maybe_map = maybe_map;
+//# sourceMappingURL=utils.js.map
 
 /***/ }),
 
 /***/ 4467:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+/***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.FallbackEncoder = exports.isRequestOptions = void 0;
-const values_1 = __nccwpck_require__(8925);
-// This is required so that we can determine if a given object matches the RequestOptions
-// type at runtime. While this requires duplication, it is enforced by the TypeScript
-// compiler such that any missing / extraneous keys will cause an error.
-const requestOptionsKeys = {
-    method: true,
-    path: true,
-    query: true,
-    body: true,
-    headers: true,
-    maxRetries: true,
-    stream: true,
-    timeout: true,
-    httpAgent: true,
-    signal: true,
-    idempotencyKey: true,
-    __binaryResponse: true,
-};
-const isRequestOptions = (obj) => {
-    return (typeof obj === 'object' &&
-        obj !== null &&
-        !(0, values_1.isEmptyObj)(obj) &&
-        Object.keys(obj).every((k) => (0, values_1.hasOwn)(requestOptionsKeys, k)));
-};
-exports.isRequestOptions = isRequestOptions;
+exports.FallbackEncoder = void 0;
 const FallbackEncoder = ({ headers, body }) => {
     return {
         bodyHeaders: {
@@ -28813,39 +29444,14 @@ exports.FallbackEncoder = FallbackEncoder;
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.ReadableStreamFrom = exports.makeReadableStream = exports.isFsReadStreamLike = exports.isReadableLike = exports.getDefaultFetch = void 0;
+exports.CancelReadableStream = exports.ReadableStreamToAsyncIterable = exports.ReadableStreamFrom = exports.makeReadableStream = exports.getDefaultFetch = void 0;
 function getDefaultFetch() {
     if (typeof fetch !== 'undefined') {
         return fetch;
     }
-    throw new Error('`fetch` is not defined as a global; Either pass `fetch` to the client, `new Stainless({ fetch })` or polyfill the global, `globalThis.fetch = fetch`');
+    throw new Error('`fetch` is not defined as a global; Either pass `fetch` to the client, `new StainlessV0({ fetch })` or polyfill the global, `globalThis.fetch = fetch`');
 }
 exports.getDefaultFetch = getDefaultFetch;
-/**
- * Determines if the given value looks like a NodeJS `stream.Readable`
- * object and that it is readable, i.e. has not been consumed.
- *
- * https://nodejs.org/api/stream.html#class-streamreadable
- */
-function isReadableLike(value) {
-    // We declare our own class of Readable here, so it's not feasible to
-    // do an 'instanceof' check. Instead, check for Readable-like properties.
-    return !!value && value.readable === true && typeof value.read === 'function';
-}
-exports.isReadableLike = isReadableLike;
-/**
- * Determines if the given value looks like a NodeJS `fs.ReadStream`
- * object.
- *
- * This just checks if the object matches our `Readable` interface
- * and defines a `path` property, there may be false positives.
- *
- * https://nodejs.org/api/fs.html#class-fsreadstream
- */
-function isFsReadStreamLike(value) {
-    return isReadableLike(value) && 'path' in value;
-}
-exports.isFsReadStreamLike = isFsReadStreamLike;
 function makeReadableStream(...args) {
     const ReadableStream = globalThis.ReadableStream;
     if (typeof ReadableStream === 'undefined') {
@@ -28875,7 +29481,416 @@ function ReadableStreamFrom(iterable) {
     });
 }
 exports.ReadableStreamFrom = ReadableStreamFrom;
+/**
+ * Most browsers don't yet have async iterable support for ReadableStream,
+ * and Node has a very different way of reading bytes from its "ReadableStream".
+ *
+ * This polyfill was pulled from https://github.com/MattiasBuelens/web-streams-polyfill/pull/122#issuecomment-1627354490
+ */
+function ReadableStreamToAsyncIterable(stream) {
+    if (stream[Symbol.asyncIterator])
+        return stream;
+    const reader = stream.getReader();
+    return {
+        async next() {
+            try {
+                const result = await reader.read();
+                if (result?.done)
+                    reader.releaseLock(); // release lock when stream becomes closed
+                return result;
+            }
+            catch (e) {
+                reader.releaseLock(); // release lock when stream becomes errored
+                throw e;
+            }
+        },
+        async return() {
+            const cancelPromise = reader.cancel();
+            reader.releaseLock();
+            await cancelPromise;
+            return { done: true, value: undefined };
+        },
+        [Symbol.asyncIterator]() {
+            return this;
+        },
+    };
+}
+exports.ReadableStreamToAsyncIterable = ReadableStreamToAsyncIterable;
+/**
+ * Cancels a ReadableStream we don't need to consume.
+ * See https://undici.nodejs.org/#/?id=garbage-collection
+ */
+async function CancelReadableStream(stream) {
+    if (stream === null || typeof stream !== 'object')
+        return;
+    if (stream[Symbol.asyncIterator]) {
+        await stream[Symbol.asyncIterator]().return?.();
+        return;
+    }
+    const reader = stream.getReader();
+    const cancelPromise = reader.cancel();
+    reader.releaseLock();
+    await cancelPromise;
+}
+exports.CancelReadableStream = CancelReadableStream;
 //# sourceMappingURL=shims.js.map
+
+/***/ }),
+
+/***/ 6191:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getCrypto = void 0;
+const getBuiltinModule_1 = __nccwpck_require__(8573);
+let getCrypto = function lazyGetCrypto() {
+    if (exports.getCrypto !== lazyGetCrypto)
+        return (0, exports.getCrypto)();
+    const crypto = globalThis.crypto || (0, getBuiltinModule_1.getBuiltinModule)?.('node:crypto')?.webcrypto;
+    exports.getCrypto = () => crypto;
+    return crypto;
+};
+exports.getCrypto = getCrypto;
+//# sourceMappingURL=crypto.js.map
+
+/***/ }),
+
+/***/ 4112:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getFile = void 0;
+const getBuiltinModule_1 = __nccwpck_require__(8573);
+let getFile = function lazyGetFile() {
+    if (exports.getFile !== lazyGetFile)
+        return (0, exports.getFile)();
+    // We can drop getBuiltinModule once we no longer support Node < 20.0.0
+    const File = globalThis.File ?? (0, getBuiltinModule_1.getBuiltinModule)?.('node:buffer')?.File;
+    if (!File)
+        throw new Error('`File` is not defined as a global, which is required for file uploads.');
+    exports.getFile = () => File;
+    return File;
+};
+exports.getFile = getFile;
+//# sourceMappingURL=file.js.map
+
+/***/ }),
+
+/***/ 8573:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getBuiltinModule = void 0;
+/**
+ * Load a Node built-in module. ID may or may not be prefixed by `node:` and
+ * will be normalized. If we used static imports then our bundle size would be bloated by
+ * injected polyfills, and if we used dynamic require then in addition to bundlers logging warnings,
+ * our code would not work when bundled to ESM and run in Node 18.
+ * @param {string} id ID of the built-in to be loaded.
+ * @returns {object|undefined} exports of the built-in. Undefined if the built-in
+ * does not exist.
+ */
+let getBuiltinModule = function getBuiltinModuleLazy(id) {
+    try {
+        if (exports.getBuiltinModule !== getBuiltinModuleLazy)
+            return exports.getBuiltinModule(id);
+        if (process.getBuiltinModule) {
+            exports.getBuiltinModule = process.getBuiltinModule;
+        }
+        else {
+            /* Fallback implementation for Node 18 */
+            function createFallbackGetBuiltinModule(BuiltinModule) {
+                return function getBuiltinModule(id) {
+                    id = BuiltinModule.normalizeRequirableId(String(id));
+                    if (!BuiltinModule.canBeRequiredByUsers(id)) {
+                        return;
+                    }
+                    const mod = BuiltinModule.map.get(id);
+                    mod.compileForPublicLoader();
+                    return mod.exports;
+                };
+            }
+            const magicKey = Math.random() + '';
+            let module;
+            let ObjectPrototype = Blob;
+            for (let next; (next = Reflect.getPrototypeOf(ObjectPrototype)); ObjectPrototype = next)
+                ;
+            try {
+                const kClone = Object.getOwnPropertySymbols(Blob.prototype).find((e) => e.description?.includes('clone'));
+                Object.defineProperty(ObjectPrototype, magicKey, {
+                    get() {
+                        module = this;
+                        throw null;
+                    },
+                    configurable: true,
+                });
+                structuredClone(new (class extends Blob {
+                    [kClone]() {
+                        return {
+                            deserializeInfo: 'internal/bootstrap/realm:' + magicKey,
+                        };
+                    }
+                })([]));
+            }
+            catch { }
+            delete ObjectPrototype[magicKey];
+            if (module) {
+                exports.getBuiltinModule = createFallbackGetBuiltinModule(module.BuiltinModule);
+            }
+            else {
+                exports.getBuiltinModule = () => undefined;
+            }
+        }
+        return exports.getBuiltinModule(id);
+    }
+    catch {
+        return undefined;
+    }
+};
+exports.getBuiltinModule = getBuiltinModule;
+//# sourceMappingURL=getBuiltinModule.js.map
+
+/***/ }),
+
+/***/ 8899:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.toFile = void 0;
+const file_1 = __nccwpck_require__(4112);
+const uploads_1 = __nccwpck_require__(9919);
+/**
+ * This check adds the arrayBuffer() method type because it is available and used at runtime
+ */
+const isBlobLike = (value) => value != null &&
+    typeof value === 'object' &&
+    typeof value.size === 'number' &&
+    typeof value.type === 'string' &&
+    typeof value.text === 'function' &&
+    typeof value.slice === 'function' &&
+    typeof value.arrayBuffer === 'function';
+/**
+ * This check adds the arrayBuffer() method type because it is available and used at runtime
+ */
+const isFileLike = (value) => value != null &&
+    typeof value === 'object' &&
+    typeof value.name === 'string' &&
+    typeof value.lastModified === 'number' &&
+    isBlobLike(value);
+const isResponseLike = (value) => value != null &&
+    typeof value === 'object' &&
+    typeof value.url === 'string' &&
+    typeof value.blob === 'function';
+/**
+ * Helper for creating a {@link File} to pass to an SDK upload method from a variety of different data formats
+ * @param value the raw content of the file.  Can be an {@link Uploadable}, {@link BlobLikePart}, or {@link AsyncIterable} of {@link BlobLikePart}s
+ * @param {string=} name the name of the file. If omitted, toFile will try to determine a file name from bits if possible
+ * @param {Object=} options additional properties
+ * @param {string=} options.type the MIME type of the content
+ * @param {number=} options.lastModified the last modified timestamp
+ * @returns a {@link File} with the given properties
+ */
+async function toFile(value, name, options) {
+    // If it's a promise, resolve it.
+    value = await value;
+    // If we've been given a `File` we don't need to do anything
+    if (isFileLike(value)) {
+        if (value instanceof (0, file_1.getFile)()) {
+            return value;
+        }
+        return (0, uploads_1.makeFile)([await value.arrayBuffer()], value.name);
+    }
+    if (isResponseLike(value)) {
+        const blob = await value.blob();
+        name || (name = new URL(value.url).pathname.split(/[\\/]/).pop());
+        return (0, uploads_1.makeFile)(await getBytes(blob), name, options);
+    }
+    const parts = await getBytes(value);
+    name || (name = (0, uploads_1.getName)(value));
+    if (!options?.type) {
+        const type = parts.find((part) => typeof part === 'object' && 'type' in part && part.type);
+        if (typeof type === 'string') {
+            options = { ...options, type };
+        }
+    }
+    return (0, uploads_1.makeFile)(parts, name, options);
+}
+exports.toFile = toFile;
+async function getBytes(value) {
+    let parts = [];
+    if (typeof value === 'string' ||
+        ArrayBuffer.isView(value) || // includes Uint8Array, Buffer, etc.
+        value instanceof ArrayBuffer) {
+        parts.push(value);
+    }
+    else if (isBlobLike(value)) {
+        parts.push(value instanceof Blob ? value : await value.arrayBuffer());
+    }
+    else if ((0, uploads_1.isAsyncIterable)(value) // includes Readable, ReadableStream, etc.
+    ) {
+        for await (const chunk of value) {
+            parts.push(...(await getBytes(chunk))); // TODO, consider validating?
+        }
+    }
+    else {
+        const constructor = value?.constructor?.name;
+        throw new Error(`Unexpected data type: ${typeof value}${constructor ? `; constructor: ${constructor}` : ''}${propsForError(value)}`);
+    }
+    return parts;
+}
+function propsForError(value) {
+    if (typeof value !== 'object' || value === null)
+        return '';
+    const props = Object.getOwnPropertyNames(value);
+    return `; props: [${props.map((p) => `"${p}"`).join(', ')}]`;
+}
+//# sourceMappingURL=to-file.js.map
+
+/***/ }),
+
+/***/ 9919:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createForm = exports.multipartFormRequestOptions = exports.maybeMultipartFormRequestOptions = exports.isAsyncIterable = exports.getName = exports.makeFile = void 0;
+const file_1 = __nccwpck_require__(4112);
+const shims_1 = __nccwpck_require__(1511);
+/**
+ * Construct a `File` instance. This is used to ensure a helpful error is thrown
+ * for environments that don't define a global `File` yet.
+ */
+function makeFile(fileBits, fileName, options) {
+    const File = (0, file_1.getFile)();
+    return new File(fileBits, fileName ?? 'unknown_file', options);
+}
+exports.makeFile = makeFile;
+function getName(value) {
+    return (((typeof value === 'object' &&
+        value !== null &&
+        (('name' in value && value.name && String(value.name)) ||
+            ('url' in value && value.url && String(value.url)) ||
+            ('filename' in value && value.filename && String(value.filename)) ||
+            ('path' in value && value.path && String(value.path)))) ||
+        '')
+        .split(/[\\/]/)
+        .pop() || undefined);
+}
+exports.getName = getName;
+const isAsyncIterable = (value) => value != null && typeof value === 'object' && typeof value[Symbol.asyncIterator] === 'function';
+exports.isAsyncIterable = isAsyncIterable;
+/**
+ * Returns a multipart/form-data request if any part of the given request body contains a File / Blob value.
+ * Otherwise returns the request as is.
+ */
+const maybeMultipartFormRequestOptions = async (opts, fetch) => {
+    if (!hasUploadableValue(opts.body))
+        return opts;
+    return { ...opts, body: await (0, exports.createForm)(opts.body, fetch) };
+};
+exports.maybeMultipartFormRequestOptions = maybeMultipartFormRequestOptions;
+const multipartFormRequestOptions = async (opts, fetch) => {
+    return { ...opts, body: await (0, exports.createForm)(opts.body, fetch) };
+};
+exports.multipartFormRequestOptions = multipartFormRequestOptions;
+const supportsFormDataMap = new WeakMap();
+/**
+ * node-fetch doesn't support the global FormData object in recent node versions. Instead of sending
+ * properly-encoded form data, it just stringifies the object, resulting in a request body of "[object FormData]".
+ * This function detects if the fetch function provided supports the global FormData object to avoid
+ * confusing error messages later on.
+ */
+function supportsFormData(fetchObject) {
+    const fetch = typeof fetchObject === 'function' ? fetchObject : fetchObject.fetch;
+    const cached = supportsFormDataMap.get(fetch);
+    if (cached)
+        return cached;
+    const promise = (async () => {
+        try {
+            const FetchResponse = ('Response' in fetch ?
+                fetch.Response
+                : (await fetch('data:,')).constructor);
+            const data = new FormData();
+            if (data.toString() === (await new FetchResponse(data).text())) {
+                return false;
+            }
+            return true;
+        }
+        catch {
+            // avoid false negatives
+            return true;
+        }
+    })();
+    supportsFormDataMap.set(fetch, promise);
+    return promise;
+}
+const createForm = async (body, fetch) => {
+    if (!(await supportsFormData(fetch))) {
+        throw new TypeError('The provided fetch function does not support file uploads with the current global FormData class.');
+    }
+    const form = new FormData();
+    await Promise.all(Object.entries(body || {}).map(([key, value]) => addFormValue(form, key, value)));
+    return form;
+};
+exports.createForm = createForm;
+// We check for Blob not File because Bun.File doesn't inherit from File,
+// but they both inherit from Blob and have a `name` property at runtime.
+const isNamedBlob = (value) => value instanceof (0, file_1.getFile)() || (value instanceof Blob && 'name' in value);
+const isUploadable = (value) => typeof value === 'object' &&
+    value !== null &&
+    (value instanceof Response || (0, exports.isAsyncIterable)(value) || isNamedBlob(value));
+const hasUploadableValue = (value) => {
+    if (isUploadable(value))
+        return true;
+    if (Array.isArray(value))
+        return value.some(hasUploadableValue);
+    if (value && typeof value === 'object') {
+        for (const k in value) {
+            if (hasUploadableValue(value[k]))
+                return true;
+        }
+    }
+    return false;
+};
+const addFormValue = async (form, key, value) => {
+    if (value === undefined)
+        return;
+    if (value == null) {
+        throw new TypeError(`Received null for "${key}"; to pass null in FormData, you must use the string 'null'`);
+    }
+    // TODO: make nested formats configurable
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        form.append(key, String(value));
+    }
+    else if (value instanceof Response) {
+        form.append(key, makeFile([await value.blob()], getName(value)));
+    }
+    else if ((0, exports.isAsyncIterable)(value)) {
+        form.append(key, makeFile([await new Response((0, shims_1.ReadableStreamFrom)(value)).blob()], getName(value)));
+    }
+    else if (isNamedBlob(value)) {
+        form.append(key, value, getName(value));
+    }
+    else if (Array.isArray(value)) {
+        await Promise.all(value.map((entry) => addFormValue(form, key + '[]', entry)));
+    }
+    else if (typeof value === 'object') {
+        await Promise.all(Object.entries(value).map(([name, prop]) => addFormValue(form, `${key}[${name}]`, prop)));
+    }
+    else {
+        throw new TypeError(`Invalid value given to form, expected a string, number, boolean, object, Array, File or Blob but got ${value} instead`);
+    }
+};
+//# sourceMappingURL=uploads.js.map
 
 /***/ }),
 
@@ -28895,11 +29910,11 @@ exports.readEnv = void 0;
  * Will return undefined if the environment variable doesn't exist or cannot be accessed.
  */
 const readEnv = (env) => {
-    if (typeof process !== 'undefined') {
-        return process.env?.[env]?.trim() ?? undefined;
+    if (typeof globalThis.process !== 'undefined') {
+        return globalThis.process.env?.[env]?.trim() ?? undefined;
     }
-    if (typeof Deno !== 'undefined') {
-        return Deno.env?.get?.(env)?.trim();
+    if (typeof globalThis.Deno !== 'undefined') {
+        return globalThis.Deno.env?.get?.(env)?.trim();
     }
     return undefined;
 };
@@ -28909,13 +29924,14 @@ exports.readEnv = readEnv;
 /***/ }),
 
 /***/ 9377:
-/***/ ((__unused_webpack_module, exports) => {
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.logger = void 0;
+exports.formatRequestDetails = exports.loggerFor = exports.parseLogLevel = void 0;
+const values_1 = __nccwpck_require__(8925);
 const levelNumbers = {
     off: 0,
     error: 200,
@@ -28923,42 +29939,144 @@ const levelNumbers = {
     info: 400,
     debug: 500,
 };
+const parseLogLevel = (maybeLevel, sourceName, client) => {
+    if (!maybeLevel) {
+        return undefined;
+    }
+    if ((0, values_1.hasOwn)(levelNumbers, maybeLevel)) {
+        return maybeLevel;
+    }
+    loggerFor(client).warn(`${sourceName} was set to ${JSON.stringify(maybeLevel)}, expected one of ${JSON.stringify(Object.keys(levelNumbers))}`);
+    return undefined;
+};
+exports.parseLogLevel = parseLogLevel;
 function noop() { }
-function logFn(logger, clientLevel, level) {
-    if (!logger || levelNumbers[level] > levelNumbers[clientLevel]) {
+function makeLogFn(fnLevel, logger, logLevel) {
+    if (!logger || levelNumbers[fnLevel] > levelNumbers[logLevel]) {
         return noop;
     }
     else {
         // Don't wrap logger functions, we want the stacktrace intact!
-        return logger[level].bind(logger);
+        return logger[fnLevel].bind(logger);
     }
 }
-let lastLogger;
-let lastLevel;
-let lastLevelLogger;
-function logger(client) {
-    let { logger, logLevel: clientLevel } = client;
-    if (lastLevel === clientLevel && (logger === lastLogger || logger === lastLogger?.deref())) {
-        return lastLevelLogger;
+const noopLogger = {
+    error: noop,
+    warn: noop,
+    info: noop,
+    debug: noop,
+};
+let cachedLoggers = new WeakMap();
+function loggerFor(client) {
+    const logger = client.logger;
+    const logLevel = client.logLevel ?? 'off';
+    if (!logger) {
+        return noopLogger;
+    }
+    const cachedLogger = cachedLoggers.get(logger);
+    if (cachedLogger && cachedLogger[0] === logLevel) {
+        return cachedLogger[1];
     }
     const levelLogger = {
-        error: logFn(logger, clientLevel, 'error'),
-        warn: logFn(logger, clientLevel, 'warn'),
-        info: logFn(logger, clientLevel, 'info'),
-        debug: logFn(logger, clientLevel, 'debug'),
+        error: makeLogFn('error', logger, logLevel),
+        warn: makeLogFn('warn', logger, logLevel),
+        info: makeLogFn('info', logger, logLevel),
+        debug: makeLogFn('debug', logger, logLevel),
     };
-    const { WeakRef } = globalThis;
-    lastLogger =
-        logger ?
-            WeakRef ? new WeakRef(logger)
-                : { deref: () => logger }
-            : undefined;
-    lastLevel = clientLevel;
-    lastLevelLogger = levelLogger;
+    cachedLoggers.set(logger, [logLevel, levelLogger]);
     return levelLogger;
 }
-exports.logger = logger;
+exports.loggerFor = loggerFor;
+const formatRequestDetails = (details) => {
+    if (details.options) {
+        details.options = { ...details.options };
+        delete details.options['headers']; // redundant + leaks internals
+    }
+    if (details.headers) {
+        details.headers = Object.fromEntries((details.headers instanceof Headers ? [...details.headers] : Object.entries(details.headers)).map(([name, value]) => [
+            name,
+            (name.toLowerCase() === 'authorization' ||
+                name.toLowerCase() === 'cookie' ||
+                name.toLowerCase() === 'set-cookie') ?
+                '***'
+                : value,
+        ]));
+    }
+    if ('retryOfRequestLogID' in details) {
+        if (details.retryOfRequestLogID) {
+            details.retryOf = details.retryOfRequestLogID;
+        }
+        delete details.retryOfRequestLogID;
+    }
+    return details;
+};
+exports.formatRequestDetails = formatRequestDetails;
 //# sourceMappingURL=log.js.map
+
+/***/ }),
+
+/***/ 6224:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.path = exports.createPathTagFunction = exports.encodeURIPath = void 0;
+const error_1 = __nccwpck_require__(37);
+/**
+ * Percent-encode everything that isn't safe to have in a path without encoding safe chars.
+ *
+ * Taken from https://datatracker.ietf.org/doc/html/rfc3986#section-3.3:
+ * > unreserved  = ALPHA / DIGIT / "-" / "." / "_" / "~"
+ * > sub-delims  = "!" / "$" / "&" / "'" / "(" / ")" / "*" / "+" / "," / ";" / "="
+ * > pchar       = unreserved / pct-encoded / sub-delims / ":" / "@"
+ */
+function encodeURIPath(str) {
+    return str.replace(/[^A-Za-z0-9\-._~!$&'()*+,;=:@]+/g, encodeURIComponent);
+}
+exports.encodeURIPath = encodeURIPath;
+const createPathTagFunction = (pathEncoder = encodeURIPath) => function path(statics, ...params) {
+    // If there are no params, no processing is needed.
+    if (statics.length === 1)
+        return statics[0];
+    let postPath = false;
+    const path = statics.reduce((previousValue, currentValue, index) => {
+        if (/[?#]/.test(currentValue)) {
+            postPath = true;
+        }
+        return (previousValue +
+            currentValue +
+            (index === params.length ? '' : (postPath ? encodeURIComponent : pathEncoder)(String(params[index]))));
+    }, '');
+    const pathOnly = path.split(/[?#]/, 1)[0];
+    const invalidSegments = [];
+    const invalidSegmentPattern = /(?<=^|\/)(?:\.|%2e){1,2}(?=\/|$)/gi;
+    let match;
+    // Find all invalid segments
+    while ((match = invalidSegmentPattern.exec(pathOnly)) !== null) {
+        invalidSegments.push({
+            start: match.index,
+            length: match[0].length,
+        });
+    }
+    if (invalidSegments.length > 0) {
+        let lastEnd = 0;
+        const underline = invalidSegments.reduce((acc, segment) => {
+            const spaces = ' '.repeat(segment.start - lastEnd);
+            const arrows = '^'.repeat(segment.length);
+            lastEnd = segment.start + segment.length;
+            return acc + spaces + arrows;
+        }, '');
+        throw new error_1.StainlessV0Error(`Path parameters result in path with invalid segments:\n${path}\n${underline}`);
+    }
+    return path;
+};
+exports.createPathTagFunction = createPathTagFunction;
+/**
+ * URI-encodes path params and ensures no unsafe /./ or /../ path segments are introduced.
+ */
+exports.path = (0, exports.createPathTagFunction)(encodeURIPath);
+//# sourceMappingURL=path.js.map
 
 /***/ }),
 
@@ -28984,15 +30102,20 @@ exports.sleep = sleep;
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.uuid4 = void 0;
-const crypto_node_1 = __nccwpck_require__(7472);
+const crypto_1 = __nccwpck_require__(6191);
 /**
  * https://stackoverflow.com/a/2117523
  */
-function uuid4() {
-    if (crypto_node_1.crypto.randomUUID)
-        return crypto_node_1.crypto.randomUUID();
-    return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, (c) => (+c ^ (crypto_node_1.crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (+c / 4)))).toString(16));
-}
+let uuid4 = function () {
+    const crypto = (0, crypto_1.getCrypto)();
+    if (crypto?.randomUUID) {
+        exports.uuid4 = crypto.randomUUID.bind(crypto);
+        return crypto.randomUUID();
+    }
+    const u8 = new Uint8Array(1);
+    const randomByte = crypto ? () => crypto.getRandomValues(u8)[0] : () => (Math.random() * 0xff) & 0xff;
+    return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, (c) => (+c ^ (randomByte() & (15 >> (+c / 4)))).toString(16));
+};
 exports.uuid4 = uuid4;
 //# sourceMappingURL=uuid.js.map
 
@@ -29005,8 +30128,8 @@ exports.uuid4 = uuid4;
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.maybeCoerceBoolean = exports.maybeCoerceFloat = exports.maybeCoerceInteger = exports.coerceBoolean = exports.coerceFloat = exports.coerceInteger = exports.validatePositiveInteger = exports.ensurePresent = exports.isObj = exports.hasOwn = exports.isEmptyObj = exports.maybeObj = exports.isAbsoluteURL = void 0;
-const error_1 = __nccwpck_require__(6549);
+exports.safeJSON = exports.maybeCoerceBoolean = exports.maybeCoerceFloat = exports.maybeCoerceInteger = exports.coerceBoolean = exports.coerceFloat = exports.coerceInteger = exports.validatePositiveInteger = exports.ensurePresent = exports.isObj = exports.hasOwn = exports.isEmptyObj = exports.maybeObj = exports.isAbsoluteURL = void 0;
+const error_1 = __nccwpck_require__(37);
 // https://url.spec.whatwg.org/#url-scheme-string
 const startsWithSchemeRegexp = /^[a-z][a-z0-9+.-]*:/i;
 const isAbsoluteURL = (url) => {
@@ -29041,17 +30164,17 @@ function isObj(obj) {
 exports.isObj = isObj;
 const ensurePresent = (value) => {
     if (value == null) {
-        throw new error_1.StainlessError(`Expected a value to be given but received ${value} instead.`);
+        throw new error_1.StainlessV0Error(`Expected a value to be given but received ${value} instead.`);
     }
     return value;
 };
 exports.ensurePresent = ensurePresent;
 const validatePositiveInteger = (name, n) => {
     if (typeof n !== 'number' || !Number.isInteger(n)) {
-        throw new error_1.StainlessError(`${name} must be an integer`);
+        throw new error_1.StainlessV0Error(`${name} must be an integer`);
     }
     if (n < 0) {
-        throw new error_1.StainlessError(`${name} must be a positive integer`);
+        throw new error_1.StainlessV0Error(`${name} must be a positive integer`);
     }
     return n;
 };
@@ -29061,7 +30184,7 @@ const coerceInteger = (value) => {
         return Math.round(value);
     if (typeof value === 'string')
         return parseInt(value, 10);
-    throw new error_1.StainlessError(`Could not coerce ${value} (type: ${typeof value}) into a number`);
+    throw new error_1.StainlessV0Error(`Could not coerce ${value} (type: ${typeof value}) into a number`);
 };
 exports.coerceInteger = coerceInteger;
 const coerceFloat = (value) => {
@@ -29069,7 +30192,7 @@ const coerceFloat = (value) => {
         return value;
     if (typeof value === 'string')
         return parseFloat(value);
-    throw new error_1.StainlessError(`Could not coerce ${value} (type: ${typeof value}) into a number`);
+    throw new error_1.StainlessV0Error(`Could not coerce ${value} (type: ${typeof value}) into a number`);
 };
 exports.coerceFloat = coerceFloat;
 const coerceBoolean = (value) => {
@@ -29101,29 +30224,154 @@ const maybeCoerceBoolean = (value) => {
     return (0, exports.coerceBoolean)(value);
 };
 exports.maybeCoerceBoolean = maybeCoerceBoolean;
+const safeJSON = (text) => {
+    try {
+        return JSON.parse(text);
+    }
+    catch (err) {
+        return undefined;
+    }
+};
+exports.safeJSON = safeJSON;
 //# sourceMappingURL=values.js.map
 
 /***/ }),
 
-/***/ 4479:
-/***/ ((__unused_webpack_module, exports) => {
+/***/ 864:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.APIResource = void 0;
-class APIResource {
-    constructor(client) {
-        this._client = client;
+exports.BuildTargetOutputs = void 0;
+const resource_1 = __nccwpck_require__(3295);
+class BuildTargetOutputs extends resource_1.APIResource {
+    /**
+     * TODO
+     */
+    retrieve(query, options) {
+        return this._client.get('/v0/build_target_outputs', { query, ...options });
     }
 }
-exports.APIResource = APIResource;
-//# sourceMappingURL=resource.js.map
+exports.BuildTargetOutputs = BuildTargetOutputs;
+//# sourceMappingURL=build-target-outputs.js.map
 
 /***/ }),
 
-/***/ 7318:
+/***/ 4656:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Builds = void 0;
+const resource_1 = __nccwpck_require__(3295);
+const path_1 = __nccwpck_require__(6224);
+class Builds extends resource_1.APIResource {
+    /**
+     * TODO
+     */
+    create(body, options) {
+        return this._client.post('/v0/builds', { body, ...options });
+    }
+    /**
+     * TODO
+     */
+    retrieve(buildID, options) {
+        return this._client.get((0, path_1.path) `/v0/builds/${buildID}`, options);
+    }
+    /**
+     * TODO
+     */
+    list(query, options) {
+        return this._client.get('/v0/builds', { query, ...options });
+    }
+}
+exports.Builds = Builds;
+//# sourceMappingURL=builds.js.map
+
+/***/ }),
+
+/***/ 4489:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Projects = exports.Builds = exports.BuildTargetOutputs = void 0;
+var build_target_outputs_1 = __nccwpck_require__(864);
+Object.defineProperty(exports, "BuildTargetOutputs", ({ enumerable: true, get: function () { return build_target_outputs_1.BuildTargetOutputs; } }));
+var builds_1 = __nccwpck_require__(4656);
+Object.defineProperty(exports, "Builds", ({ enumerable: true, get: function () { return builds_1.Builds; } }));
+var projects_1 = __nccwpck_require__(3636);
+Object.defineProperty(exports, "Projects", ({ enumerable: true, get: function () { return projects_1.Projects; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 7738:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Branches = void 0;
+const resource_1 = __nccwpck_require__(3295);
+const path_1 = __nccwpck_require__(6224);
+class Branches extends resource_1.APIResource {
+    /**
+     * TODO
+     */
+    create(project, body, options) {
+        return this._client.post((0, path_1.path) `/v0/projects/${project}/branches`, { body, ...options });
+    }
+    /**
+     * TODO
+     */
+    retrieve(branch, params, options) {
+        const { project } = params;
+        return this._client.get((0, path_1.path) `/v0/projects/${project}/branches/${branch}`, options);
+    }
+}
+exports.Branches = Branches;
+//# sourceMappingURL=branches.js.map
+
+/***/ }),
+
+/***/ 3:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Configs = void 0;
+const resource_1 = __nccwpck_require__(3295);
+const path_1 = __nccwpck_require__(6224);
+class Configs extends resource_1.APIResource {
+    /**
+     * TODO
+     */
+    retrieve(project, query = {}, options) {
+        return this._client.get((0, path_1.path) `/v0/projects/${project}/configs`, { query, ...options });
+    }
+    /**
+     * TODO
+     */
+    guess(project, body, options) {
+        return this._client.post((0, path_1.path) `/v0/projects/${project}/configs/guess`, { body, ...options });
+    }
+}
+exports.Configs = Configs;
+//# sourceMappingURL=configs.js.map
+
+/***/ }),
+
+/***/ 3636:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -29153,253 +30401,36 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Builds = void 0;
-const resource_1 = __nccwpck_require__(4479);
-const OutputsAPI = __importStar(__nccwpck_require__(3009));
-const outputs_1 = __nccwpck_require__(3009);
-const uploads_1 = __nccwpck_require__(3173);
-class Builds extends resource_1.APIResource {
+exports.Projects = void 0;
+const resource_1 = __nccwpck_require__(3295);
+const BranchesAPI = __importStar(__nccwpck_require__(7738));
+const branches_1 = __nccwpck_require__(7738);
+const ConfigsAPI = __importStar(__nccwpck_require__(3));
+const configs_1 = __nccwpck_require__(3);
+const path_1 = __nccwpck_require__(6224);
+class Projects extends resource_1.APIResource {
     constructor() {
         super(...arguments);
-        this.outputs = new OutputsAPI.Outputs(this._client);
+        this.branches = new BranchesAPI.Branches(this._client);
+        this.configs = new ConfigsAPI.Configs(this._client);
     }
     /**
-     * Create a build by uploading a spec along with some other info
+     * TODO
      */
-    create(body, options) {
-        return this._client.post('/api/spec', (0, uploads_1.multipartFormRequestOptions)({ body, ...options, headers: { Accept: '*/*', ...options?.headers } }));
+    retrieve(projectName, options) {
+        return this._client.get((0, path_1.path) `/v0/projects/${projectName}`, options);
     }
     /**
-     * Retrieve a list of builds for a project
+     * TODO
      */
-    list(query, options) {
-        return this._client.get('/v1/builds', { query, ...options });
+    update(projectName, body = {}, options) {
+        return this._client.patch((0, path_1.path) `/v0/projects/${projectName}`, { body, ...options });
     }
 }
-exports.Builds = Builds;
-Builds.Outputs = outputs_1.Outputs;
-//# sourceMappingURL=builds.js.map
-
-/***/ }),
-
-/***/ 3009:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Outputs = void 0;
-const resource_1 = __nccwpck_require__(4479);
-class Outputs extends resource_1.APIResource {
-    /**
-     * Get the output status and details for a specific target for a specific build
-     */
-    retrieve(id, params, options) {
-        const { target } = params;
-        return this._client.get(`/v1/builds/${id}/outputs/${target}`, options);
-    }
-}
-exports.Outputs = Outputs;
-//# sourceMappingURL=outputs.js.map
-
-/***/ }),
-
-/***/ 4489:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Builds = void 0;
-var builds_1 = __nccwpck_require__(7318);
-Object.defineProperty(exports, "Builds", ({ enumerable: true, get: function () { return builds_1.Builds; } }));
-//# sourceMappingURL=index.js.map
-
-/***/ }),
-
-/***/ 3173:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.createForm = exports.multipartFormRequestOptions = exports.maybeMultipartFormRequestOptions = exports.toFile = exports.isUploadable = exports.isResponseLike = exports.isFileLike = exports.isBlobLike = void 0;
-const shims_1 = __nccwpck_require__(1511);
-__nccwpck_require__(6877);
-/**
- * This check adds the arrayBuffer() method type because it is available and used at runtime
- */
-const isBlobLike = (value) => value != null &&
-    typeof value === 'object' &&
-    typeof value.size === 'number' &&
-    typeof value.type === 'string' &&
-    typeof value.text === 'function' &&
-    typeof value.slice === 'function' &&
-    typeof value.arrayBuffer === 'function';
-exports.isBlobLike = isBlobLike;
-const isFileLike = (value) => value != null &&
-    typeof value === 'object' &&
-    typeof value.name === 'string' &&
-    typeof value.lastModified === 'number' &&
-    (0, exports.isBlobLike)(value);
-exports.isFileLike = isFileLike;
-const isResponseLike = (value) => value != null &&
-    typeof value === 'object' &&
-    typeof value.url === 'string' &&
-    typeof value.blob === 'function';
-exports.isResponseLike = isResponseLike;
-const isUploadable = (value) => {
-    return (0, exports.isFileLike)(value) || (0, exports.isResponseLike)(value) || (0, shims_1.isFsReadStreamLike)(value);
-};
-exports.isUploadable = isUploadable;
-/**
- * Construct a `File` instance. This is used to ensure a helpful error is thrown
- * for environments that don't define a global `File` yet and so that we don't
- * accidentally rely on a global `File` type in our annotations.
- */
-function makeFile(fileBits, fileName, options) {
-    const File = globalThis.File;
-    if (typeof File === 'undefined') {
-        throw new Error('`File` is not defined as a global which is required for file uploads');
-    }
-    return new File(fileBits, fileName, options);
-}
-/**
- * Helper for creating a {@link File} to pass to an SDK upload method from a variety of different data formats
- * @param value the raw content of the file.  Can be an {@link Uploadable}, {@link BlobLikePart}, or {@link AsyncIterable} of {@link BlobLikePart}s
- * @param {string=} name the name of the file. If omitted, toFile will try to determine a file name from bits if possible
- * @param {Object=} options additional properties
- * @param {string=} options.type the MIME type of the content
- * @param {number=} options.lastModified the last modified timestamp
- * @returns a {@link File} with the given properties
- */
-async function toFile(value, name, options) {
-    // If it's a promise, resolve it.
-    value = await value;
-    // If we've been given a `File` we don't need to do anything
-    if ((0, exports.isFileLike)(value)) {
-        return value;
-    }
-    if ((0, exports.isResponseLike)(value)) {
-        const blob = await value.blob();
-        name || (name = new URL(value.url).pathname.split(/[\\/]/).pop() ?? 'unknown_file');
-        // we need to convert the `Blob` into an array buffer because the `Blob` class
-        // that `node-fetch` defines is incompatible with the web standard which results
-        // in `new File` interpreting it as a string instead of binary data.
-        const data = (0, exports.isBlobLike)(blob) ? [(await blob.arrayBuffer())] : [blob];
-        return makeFile(data, name, options);
-    }
-    const bits = await getBytes(value);
-    name || (name = getName(value) ?? 'unknown_file');
-    if (!options?.type) {
-        const type = bits[0]?.type;
-        if (typeof type === 'string') {
-            options = { ...options, type };
-        }
-    }
-    return makeFile(bits, name, options);
-}
-exports.toFile = toFile;
-async function getBytes(value) {
-    let parts = [];
-    if (typeof value === 'string' ||
-        ArrayBuffer.isView(value) || // includes Uint8Array, Buffer, etc.
-        value instanceof ArrayBuffer) {
-        parts.push(value);
-    }
-    else if ((0, exports.isBlobLike)(value)) {
-        parts.push(await value.arrayBuffer());
-    }
-    else if (isAsyncIterableIterator(value) // includes Readable, ReadableStream, etc.
-    ) {
-        for await (const chunk of value) {
-            parts.push(chunk); // TODO, consider validating?
-        }
-    }
-    else {
-        throw new Error(`Unexpected data type: ${typeof value}; constructor: ${value?.constructor
-            ?.name}; props: ${propsForError(value)}`);
-    }
-    return parts;
-}
-function propsForError(value) {
-    const props = Object.getOwnPropertyNames(value);
-    return `[${props.map((p) => `"${p}"`).join(', ')}]`;
-}
-function getName(value) {
-    return (getStringFromMaybeBuffer(value.name) ||
-        getStringFromMaybeBuffer(value.filename) ||
-        // For fs.ReadStream
-        getStringFromMaybeBuffer(value.path)?.split(/[\\/]/).pop());
-}
-const getStringFromMaybeBuffer = (x) => {
-    if (typeof x === 'string')
-        return x;
-    if (typeof Buffer !== 'undefined' && x instanceof Buffer)
-        return String(x);
-    return undefined;
-};
-const isAsyncIterableIterator = (value) => value != null && typeof value === 'object' && typeof value[Symbol.asyncIterator] === 'function';
-/**
- * Returns a multipart/form-data request if any part of the given request body contains a File / Blob value.
- * Otherwise returns the request as is.
- */
-const maybeMultipartFormRequestOptions = async (opts) => {
-    if (!hasUploadableValue(opts.body))
-        return opts;
-    return { ...opts, body: await (0, exports.createForm)(opts.body) };
-};
-exports.maybeMultipartFormRequestOptions = maybeMultipartFormRequestOptions;
-const multipartFormRequestOptions = async (opts) => {
-    return { ...opts, body: await (0, exports.createForm)(opts.body) };
-};
-exports.multipartFormRequestOptions = multipartFormRequestOptions;
-const createForm = async (body) => {
-    const form = new FormData();
-    await Promise.all(Object.entries(body || {}).map(([key, value]) => addFormValue(form, key, value)));
-    return form;
-};
-exports.createForm = createForm;
-const hasUploadableValue = (value) => {
-    if ((0, exports.isUploadable)(value))
-        return true;
-    if (Array.isArray(value))
-        return value.some(hasUploadableValue);
-    if (value && typeof value === 'object') {
-        for (const k in value) {
-            if (hasUploadableValue(value[k]))
-                return true;
-        }
-    }
-    return false;
-};
-const addFormValue = async (form, key, value) => {
-    if (value === undefined)
-        return;
-    if (value == null) {
-        throw new TypeError(`Received null for "${key}"; to pass null in FormData, you must use the string 'null'`);
-    }
-    // TODO: make nested formats configurable
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-        form.append(key, String(value));
-    }
-    else if ((0, exports.isUploadable)(value)) {
-        const file = await toFile(value);
-        form.append(key, file);
-    }
-    else if (Array.isArray(value)) {
-        await Promise.all(value.map((entry) => addFormValue(form, key + '[]', entry)));
-    }
-    else if (typeof value === 'object') {
-        await Promise.all(Object.entries(value).map(([name, prop]) => addFormValue(form, `${key}[${name}]`, prop)));
-    }
-    else {
-        throw new TypeError(`Invalid value given to form, expected a string, number, boolean, object, Array, File or Blob but got ${value} instead`);
-    }
-};
-//# sourceMappingURL=uploads.js.map
+exports.Projects = Projects;
+Projects.Branches = branches_1.Branches;
+Projects.Configs = configs_1.Configs;
+//# sourceMappingURL=projects.js.map
 
 /***/ }),
 
@@ -29410,7 +30441,7 @@ const addFormValue = async (form, key, value) => {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.VERSION = void 0;
-exports.VERSION = '0.1.0-alpha.14'; // x-release-please-version
+exports.VERSION = '0.1.0-alpha.1'; // x-release-please-version
 //# sourceMappingURL=version.js.map
 
 /***/ })
