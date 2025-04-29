@@ -73,7 +73,7 @@ async function main() {
 
     if (commitMessage && !isValidConventionalCommitMessage(commitMessage)) {
       console.error(
-        "Invalid commit message format. Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/",
+        `Invalid commit message: ${commitMessage}. Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/`,
       );
       process.exit(1);
     }
