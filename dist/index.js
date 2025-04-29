@@ -25722,7 +25722,7 @@ async function main() {
         })();
         const stainless = new stainless_1.StainlessV0({ apiKey, logLevel: "warn" });
         if (commitMessage && !(0, exports.isValidConventionalCommitMessage)(commitMessage)) {
-            console.error("Invalid commit message format. Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/");
+            console.error(`Invalid commit message: ${commitMessage}. Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/`);
             process.exit(1);
         }
         // Find builds against parent revisions
