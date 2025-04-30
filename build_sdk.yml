@@ -338,6 +338,7 @@ jobs:
           commit_message: ${{ github.event.pull_request.title }}
           branch: main
           merge_branch: preview/${{ github.head_ref }}
+          guess_config: false
 
       - name: Comment on Pull Request
         if: steps.config-changed.outputs.changed == 'true'
