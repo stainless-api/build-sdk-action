@@ -171,6 +171,7 @@ async function main() {
           await stainless.projects.branches.create(projectName, {
             branch_from: previousBuild.config_commit,
             branch,
+            force: true,
           });
         }
       }
