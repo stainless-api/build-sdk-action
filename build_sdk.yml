@@ -32,19 +32,11 @@ jobs:
         id: parent-commits
         run: |
           # In order, prefer pushing generated code onto:
-          # - a build on the commit right before the current PR's commit
           # - a build on the commit that this PR will be merged into
           # - a build that's happened on the branch that this PR will be merged into
           # - a build against the main branch of this project
 
           HEAD=${{ github.event.pull_request.head.sha }}
-
-          git fetch --depth=2 origin "${HEAD}" --depth=2
-          PARENT_SHA=$(git rev-parse "${HEAD}^1")
-
-          echo "Parent commit: $PARENT_SHA"
-          echo "parent_sha=$PARENT_SHA" >> $GITHUB_OUTPUT
-
           BASE=${{ github.event.pull_request.base.sha }}
 
           git fetch --depth=1 origin "${BASE}"
@@ -88,30 +80,6 @@ jobs:
         if: steps.config-changed.outputs.changed == 'true'
         run: |
           PARENT_REVISION_ARGS=()
-
-          git checkout ${{ steps.parent-commits.outputs.parent_sha }}
-
-          if [ -f "${{ env.OAS_PATH }}" ]; then
-            PARENT_OAS_HASH=$(md5sum "${{ env.OAS_PATH }}" | awk '{ print $1 }')
-          else
-            echo "File ${{ env.OAS_PATH }} does not exist at parent commit."
-            PARENT_OAS_HASH=""
-          fi
-
-          if [ -f "${{ env.CONFIG_PATH }}" ]; then
-            PARENT_CONFIG_HASH=$(md5sum "${{ env.CONFIG_PATH }}" | awk '{ print $1 }')
-          else
-            echo "File ${{ env.CONFIG_PATH }} does not exist at parent commit."
-            PARENT_CONFIG_HASH=""
-          fi
-
-          PARENT_HASHES=$(jq -nc \
-            --arg "openapi.yml" "$PARENT_OAS_HASH" \
-            --arg "openapi.stainless.yml" "$PARENT_CONFIG_HASH" \
-            '$ARGS.named'
-          )
-
-          PARENT_REVISION_ARGS+=("$PARENT_HASHES")
 
           git checkout ${{ steps.parent-commits.outputs.merge_base_sha }}
 
@@ -170,9 +138,7 @@ jobs:
           script: |
             const results = JSON.parse(`${{ steps.build-sdk.outputs.results }}`);
             const outcomes = results.outcomes || {};
-            // We want to diff the second parent outcome (which corresponds to the merge base),
-            // else the first outcome that exists.
-            const parentOutcomes = results.parentOutcomes[1] || results.parentOutcomes.find(Boolean) || {};
+            const parentOutcomes = results.parentOutcomes.find(Boolean) || {};
 
             const generateRow = (lang, outcome, parentOutcome) => {
               const studioUrl = `https://app.stainlessapi.com/${process.env.STAINLESS_ORG_NAME}/${process.env.STAINLESS_PROJECT_NAME}/studio?language=${lang}&branch=preview/${{ github.head_ref }}`;
