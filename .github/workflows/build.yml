@@ -10,12 +10,12 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
       - name: Install dependencies
         run: npm install
       - name: Build TypeScript
         run: npm run build
-      - name: Commit and push changes
+      - name: Commit build changes
         if: ${{ github.ref == 'refs/heads/main' }}
         run: |
           git config --local user.name "github-actions[bot]"
@@ -24,6 +24,20 @@ jobs:
           if git diff --cached --quiet HEAD; then
             echo "No changes to commit."
           else
-            git commit -m "Build: Update dist/index.js [skip ci]"
-            git push
+            git commit -m "chore(build): Update dist/index.js [skip ci]"
           fi
+      - name: Update sample workflow and push
+        if: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          # Replace the stainless-api/build-sdk-action@ in the sample
+          # workflow with the SHA of the current build.
+          sed -i "" \
+            "s/stainless-api\/build-sdk-action@.*/stainless-api\/build-sdk-action@$(git rev-parse HEAD)/g" \
+            build_sdk.yml
+          git add build_sdk.yml
+          if git diff --cached --quiet HEAD; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore(build): Update sample workflow [skip ci]"
+          fi
+          git push
