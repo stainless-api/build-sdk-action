@@ -196,6 +196,7 @@ async function main() {
           },
       branch,
       commit_message: commitMessage,
+      allow_empty: true,
     });
     let buildId = build.id;
     let languages = Object.keys(build.targets) as Array<
