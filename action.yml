@@ -7,6 +7,10 @@ runs:
   using: node20
   main: dist/index.js
 inputs:
+  github-token:
+    description: The GitHub token used to create an authenticated client
+    default: ${{ github.token }}
+    required: false
   stainless_api_key:
     description: "Stainless API key."
     required: true

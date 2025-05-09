@@ -1,0 +1,29 @@
+name: Stainless — Preview SDK changes
+description: Build SDKs for previewing pull request changes
+runs:
+  using: node20
+  main: ../dist/preview/index.js
+inputs:
+  github-token:
+    description: The GitHub token used to create an authenticated client
+    default: ${{ github.token }}
+    required: false
+  stainless_api_key:
+    description: "Stainless API key."
+    required: true
+  oas_path:
+    description: "Path to the OpenAPI file."
+    required: true
+  config_path:
+    description: "Path to the Stainless config file."
+    required: false
+  project_name:
+    description: "Stainless project name."
+    required: true
+  org_name:
+    description: "Stainless organization name."
+    required: true
+  fail_run_on:
+    description: "When to fail the run based on build conclusions. Options: 'note', 'warning', 'error', 'fatal', 'never'."
+    required: false
+    default: "error"

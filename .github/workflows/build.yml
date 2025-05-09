@@ -3,7 +3,7 @@ name: build
 on: push
 
 jobs:
-  eslint:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,18 +21,18 @@ jobs:
         run: |
           git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git add dist/index.js
+          git add dist
           if git diff --cached --quiet HEAD; then
             echo "No changes to commit."
           else
-            git commit -m "chore(build): Update dist/index.js [skip ci]"
+            git commit -m "chore(build): Update dist [skip ci]"
           fi
           echo "current_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
       - name: Update sample workflow and push
         if: ${{ github.ref == 'refs/heads/main' }}
         run: |
-          sed -i \
-            's/stainless-api\/build-sdk-action@.*/stainless-api\/build-sdk-action@${{ steps.current_sha.outputs.current_sha }}/g' \
+          sed -i -r -e \
+            's/stainless-api\/build-sdk-action(\/?[^@]*)@.*/stainless-api\/build-sdk-action\1@${{ steps.current_sha.outputs.current_sha }}/g' \
             build_sdk.yml
           git add build_sdk.yml
           if git diff --cached --quiet HEAD; then
