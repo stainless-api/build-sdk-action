@@ -61,7 +61,8 @@ async function main() {
       commitMessage,
     });
 
-    setOutput("results", { outcomes, parentOutcomes });
+    setOutput("outcomes", outcomes);
+    setOutput("parent_outcomes", parentOutcomes);
   } catch (error) {
     console.error("Error interacting with API:", error);
     process.exit(1);

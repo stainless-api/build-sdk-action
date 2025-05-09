@@ -1,4 +1,4 @@
-import { getInput } from "@actions/core";
+import { getInput, setOutput } from "@actions/core";
 import * as exec from "@actions/exec";
 import * as github from "@actions/github";
 import { StainlessV0 as Stainless } from "stainless";
@@ -115,8 +115,9 @@ async function main() {
     const configPath =
       getInput("config_path", { required: false }) || undefined;
     const projectName = getInput("project_name", { required: true });
-    const orgName = getInput("org_name", { required: true });
-    const failRunOn = getInput("fail_run_on", { required: false }) || "error";
+    const orgName = getInput("org_name", { required: false });
+    const failRunOn = getInput("fail_run_on", { required: true }) || "error";
+    const githubToken = getInput("github_token", { required: false });
 
     const stainless = new Stainless({ apiKey, logLevel: "warn" });
 
@@ -155,14 +156,19 @@ async function main() {
     const outcomes = builds.outcomes!;
     const parentOutcomes = builds.parentOutcomes?.find(Boolean);
 
-    const commentBody = generatePreviewComment({
-      outcomes,
-      parentOutcomes,
-      orgName,
-      projectName,
-    });
+    setOutput("outcomes", outcomes);
+    setOutput("parent_outcomes", parentOutcomes);
 
-    await upsertComment({ body: commentBody });
+    if (orgName && githubToken) {
+      const commentBody = generatePreviewComment({
+        outcomes,
+        parentOutcomes,
+        orgName,
+        projectName,
+      });
+
+      await upsertComment({ body: commentBody, token: githubToken });
+    }
 
     if (!checkResults({ outcomes, failRunOn })) {
       process.exit(1);

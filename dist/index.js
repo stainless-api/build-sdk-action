@@ -30572,7 +30572,8 @@ async function main() {
             guessConfig,
             commitMessage,
         });
-        (0, core_1.setOutput)("results", { outcomes, parentOutcomes });
+        (0, core_1.setOutput)("outcomes", outcomes);
+        (0, core_1.setOutput)("parent_outcomes", parentOutcomes);
     }
     catch (error) {
         console.error("Error interacting with API:", error);

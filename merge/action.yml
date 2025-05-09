@@ -4,10 +4,6 @@ runs:
   using: node20
   main: ../dist/merge/index.js
 inputs:
-  github-token:
-    description: The GitHub token used to create an authenticated client
-    default: ${{ github.token }}
-    required: false
   stainless_api_key:
     description: "Stainless API key."
     required: true
@@ -21,9 +17,22 @@ inputs:
     description: "Stainless project name."
     required: true
   org_name:
-    description: "Stainless organization name."
-    required: true
+    description: >-
+      Stainless organization name. Required for making comments on pull requests.
+    required: false
   fail_run_on:
-    description: "When to fail the run based on build conclusions. Options: 'note', 'warning', 'error', 'fatal', 'never'."
+    description: >-
+      When to fail the run based on build conclusions. Options: 'note',
+      'warning', 'error', 'fatal', 'never'.
     required: false
     default: "error"
+  github_token:
+    description: >-
+      A GitHub token used to make comments on pull requests. If not specified,
+      comments will not be made.
+    required: false
+outputs:
+  outcomes:
+    description: >-
+      JSON-stringified object of build outcomes. Keys are languages, and values
+      contain the `commit` result of the build for that language.

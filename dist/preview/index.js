@@ -30234,7 +30234,6 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.generatePreviewComment = generatePreviewComment;
 exports.generateMergeComment = generateMergeComment;
 exports.upsertComment = upsertComment;
-const core_1 = __nccwpck_require__(7484);
 const github = __importStar(__nccwpck_require__(3228));
 function generatePreviewComment({ outcomes, parentOutcomes, orgName, projectName, }) {
     const generateRow = (lang, outcome, parentOutcome) => {
@@ -30344,8 +30343,7 @@ The following table summarizes the build outcomes for all languages:
 ${header}${tableRows}
 `;
 }
-async function upsertComment({ body }) {
-    const token = (0, core_1.getInput)("github-token", { required: true });
+async function upsertComment({ body, token, }) {
     const octokit = github.getOctokit(token);
     const { data: comments } = await octokit.rest.issues.listComments({
         owner: github.context.repo.owner,
@@ -30565,8 +30563,9 @@ async function main() {
         const oasPath = (0, core_1.getInput)("oas_path", { required: true });
         const configPath = (0, core_1.getInput)("config_path", { required: false }) || undefined;
         const projectName = (0, core_1.getInput)("project_name", { required: true });
-        const orgName = (0, core_1.getInput)("org_name", { required: true });
-        const failRunOn = (0, core_1.getInput)("fail_run_on", { required: false }) || "error";
+        const orgName = (0, core_1.getInput)("org_name", { required: false });
+        const failRunOn = (0, core_1.getInput)("fail_run_on", { required: true }) || "error";
+        const githubToken = (0, core_1.getInput)("github_token", { required: false });
         const stainless = new stainless_1.StainlessV0({ apiKey, logLevel: "warn" });
         const { mergeBaseSha, nonMainBaseRef } = await getParentCommits();
         const configChanged = await (0, config_1.isConfigChanged)({
@@ -30597,13 +30596,17 @@ async function main() {
         });
         const outcomes = builds.outcomes;
         const parentOutcomes = builds.parentOutcomes?.find(Boolean);
-        const commentBody = (0, comment_1.generatePreviewComment)({
-            outcomes,
-            parentOutcomes,
-            orgName,
-            projectName,
-        });
-        await (0, comment_1.upsertComment)({ body: commentBody });
+        (0, core_1.setOutput)("outcomes", outcomes);
+        (0, core_1.setOutput)("parent_outcomes", parentOutcomes);
+        if (orgName && githubToken) {
+            const commentBody = (0, comment_1.generatePreviewComment)({
+                outcomes,
+                parentOutcomes,
+                orgName,
+                projectName,
+            });
+            await (0, comment_1.upsertComment)({ body: commentBody, token: githubToken });
+        }
         if (!(0, build_1.checkResults)({ outcomes, failRunOn })) {
             process.exit(1);
         }

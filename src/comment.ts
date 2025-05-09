@@ -1,4 +1,3 @@
-import { getInput } from "@actions/core";
 import * as github from "@actions/github";
 import { Outcomes } from "./build";
 
@@ -152,8 +151,13 @@ ${header}${tableRows}
 `;
 }
 
-export async function upsertComment({ body }: { body: string }) {
-  const token = getInput("github-token", { required: true });
+export async function upsertComment({
+  body,
+  token,
+}: {
+  body: string;
+  token: string;
+}) {
   const octokit = github.getOctokit(token);
 
   const { data: comments } = await octokit.rest.issues.listComments({

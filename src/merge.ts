@@ -1,4 +1,4 @@
-import { getInput } from "@actions/core";
+import { getInput, setOutput } from "@actions/core";
 import * as github from "@actions/github";
 import { StainlessV0 as Stainless } from "stainless";
 import { isConfigChanged } from "./config";
@@ -13,8 +13,9 @@ async function main() {
     const configPath =
       getInput("config_path", { required: false }) || undefined;
     const projectName = getInput("project_name", { required: true });
-    const orgName = getInput("org_name", { required: true });
-    const failRunOn = getInput("fail_run_on", { required: false }) || "error";
+    const orgName = getInput("org_name", { required: false });
+    const failRunOn = getInput("fail_run_on", { required: true }) || "error";
+    const githubToken = getInput("github_token", { required: false });
 
     const stainless = new Stainless({ apiKey, logLevel: "warn" });
 
@@ -41,19 +42,23 @@ async function main() {
 
     const outcomes = builds.outcomes!;
 
-    const commentBody = generateMergeComment({
-      outcomes,
-      orgName,
-      projectName,
-    });
+    setOutput("outcomes", outcomes);
 
-    await upsertComment({ body: commentBody });
+    if (orgName && githubToken) {
+      const commentBody = generateMergeComment({
+        outcomes,
+        orgName,
+        projectName,
+      });
+
+      await upsertComment({ body: commentBody, token: githubToken });
+    }
 
     if (!checkResults({ outcomes, failRunOn })) {
       process.exit(1);
     }
   } catch (error) {
-    console.error("Error in preview action:", error);
+    console.error("Error in merge action:", error);
     process.exit(1);
   }
 }

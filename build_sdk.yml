@@ -10,10 +10,14 @@ on:
 
 env:
   OAS_PATH: { YOUR_SPEC_PATH }
-  CONFIG_PATH: { YOUR_CONFIG_PATH } # optional
+  # Optional.
+  CONFIG_PATH: { YOUR_CONFIG_PATH }
   STAINLESS_ORG_NAME: { YOUR_ORG_NAME }
   STAINLESS_PROJECT_NAME: { YOUR_PROJECT_NAME }
-  FAIL_RUN_ON: "error" # "note" | "warning" | "error" | "fatal" | "never"
+  # "never" | "note" | "warning" | "error" | "fatal"
+  FAIL_RUN_ON: "error"
+  # Optional. Only used for commenting on PRs.
+  GITHUB_TOKEN: ${{ github.token }}
 
 jobs:
   preview-sdk:
@@ -37,6 +41,7 @@ jobs:
           project_name: ${{ env.STAINLESS_PROJECT_NAME }}
           org_name: ${{ env.STAINLESS_ORG_NAME }}
           fail_run_on: ${{ env.FAIL_RUN_ON }}
+          github_token: ${{ env.GITHUB_TOKEN }}
 
   merge-sdk:
     if: github.event.action == 'closed' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
@@ -65,3 +70,4 @@ jobs:
           project_name: ${{ env.STAINLESS_PROJECT_NAME }}
           org_name: ${{ env.STAINLESS_ORG_NAME }}
           fail_run_on: ${{ env.FAIL_RUN_ON }}
+          github_token: ${{ env.GITHUB_TOKEN }}

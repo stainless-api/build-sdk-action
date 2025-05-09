@@ -7,10 +7,6 @@ runs:
   using: node20
   main: dist/index.js
 inputs:
-  github-token:
-    description: The GitHub token used to create an authenticated client
-    default: ${{ github.token }}
-    required: false
   stainless_api_key:
     description: "Stainless API key."
     required: true
@@ -42,3 +38,14 @@ inputs:
       as md5 hashes. The first matching revision that has a build will be the
       build that this build is pushed onto.
     required: false
+outputs:
+  outcomes:
+    description: >-
+      JSON-stringified object of build outcomes. Keys are languages, and values
+      contain the `commit` result of the build for that language.
+  parent_outcomes:
+    description: >-
+      JSON-stringified array, where each entry is an object of parent revision
+      build outcomes. Entries may be null if no matching parent build was found.
+      Keys are languages, and values contain the `commit` result of the build
+      for that language.
