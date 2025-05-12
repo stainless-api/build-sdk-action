@@ -44,7 +44,7 @@ jobs:
           fetch-depth: 2
 
       - name: Run preview builds
-        uses: stainless-api/build-sdk-action/preview@5d45f15076bc4d23c142e818fd5d24a773f9ce6c
+        uses: stainless-api/build-sdk-action/preview@338207e33ddb7db376a9acff4de870f3477c5d6f
         with:
           stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
           org: ${{ env.STAINLESS_ORG }}
@@ -73,7 +73,7 @@ jobs:
       # against preview/${{ github.head_ref }} to complete, but assuming that
       # the preview-sdk job happens before the PR merge, it should be fine.
       - name: Run merge build
-        uses: stainless-api/build-sdk-action/merge@5d45f15076bc4d23c142e818fd5d24a773f9ce6c
+        uses: stainless-api/build-sdk-action/merge@338207e33ddb7db376a9acff4de870f3477c5d6f
         with:
           stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
           org: ${{ env.STAINLESS_ORG }}
