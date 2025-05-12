@@ -33,8 +33,8 @@ jobs:
         run: |
           sed -i -r -e \
             's/stainless-api\/build-sdk-action(\/?[^@]*)@.*/stainless-api\/build-sdk-action\1@${{ steps.current_sha.outputs.current_sha }}/g' \
-            build_sdk.yml
-          git add build_sdk.yml
+            examples/build_sdk.yml
+          git add examples/build_sdk.yml
           if git diff --cached --quiet HEAD; then
             echo "No changes to commit."
           else
