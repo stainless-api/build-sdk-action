@@ -1,4 +1,10 @@
-import { getBooleanInput, getInput, setOutput } from "@actions/core";
+import {
+  endGroup,
+  getBooleanInput,
+  getInput,
+  setOutput,
+  startGroup,
+} from "@actions/core";
 import * as exec from "@actions/exec";
 import { StainlessV0 as Stainless } from "stainless";
 import { checkResults, runBuilds } from "./build";
@@ -29,6 +35,8 @@ async function main() {
 
     const stainless = new Stainless({ apiKey, logLevel: "warn" });
 
+    startGroup("Getting parent revision");
+
     const { mergeBaseSha, nonMainBaseRef } = await getParentCommits({
       baseSha,
       headSha,
@@ -55,8 +63,11 @@ async function main() {
       configPath,
     });
 
+    endGroup();
+    startGroup("Running builds");
+
     // Checkout HEAD for runBuilds to pull the files of:
-    await exec.exec("git", ["checkout", headSha]);
+    await exec.exec("git", ["checkout", headSha], { silent: true });
 
     const builds = await runBuilds({
       stainless,
@@ -75,7 +86,11 @@ async function main() {
     setOutput("outcomes", outcomes);
     setOutput("parent_outcomes", parentOutcomes);
 
+    endGroup();
+
     if (makeComment) {
+      startGroup("Creating comment");
+
       const commentBody = generatePreviewComment({
         outcomes,
         parentOutcomes,
@@ -84,6 +99,8 @@ async function main() {
       });
 
       await upsertComment({ body: commentBody, token: githubToken });
+
+      endGroup();
     }
 
     if (!checkResults({ outcomes, failRunOn })) {
@@ -106,30 +123,29 @@ async function getParentCommits({
   baseRef: string;
   defaultBranch: string;
 }) {
-  await exec.exec("git", ["fetch", "--depth=1", "origin", baseSha]);
+  await exec.exec("git", ["fetch", "--depth=1", "origin", baseSha], {
+    silent: true,
+  });
 
   let mergeBaseSha;
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
-      const output = await exec.getExecOutput("git", [
-        "merge-base",
-        headSha,
-        baseSha,
-      ]);
+      const output = await exec.getExecOutput(
+        "git",
+        ["merge-base", headSha, baseSha],
+        { silent: true },
+      );
       mergeBaseSha = output.stdout.trim();
       if (mergeBaseSha) break;
     } catch {}
 
     // deepen fetch until we find merge base
-    await exec.exec("git", [
-      "fetch",
-      "--quiet",
-      "--deepen=10",
-      "origin",
-      baseSha,
-      headSha,
-    ]);
+    await exec.exec(
+      "git",
+      ["fetch", "--quiet", "--deepen=10", "origin", baseSha, headSha],
+      { silent: true },
+    );
   }
 
   if (!mergeBaseSha) {
@@ -164,7 +180,7 @@ async function computeParentRevisions({
   if (mergeBaseSha) {
     let hashes: Record<string, string> = {};
 
-    await exec.exec("git", ["checkout", mergeBaseSha]);
+    await exec.exec("git", ["checkout", mergeBaseSha], { silent: true });
 
     for (const [path, file] of [
       [oasPath, "openapi.yml"],
@@ -172,7 +188,7 @@ async function computeParentRevisions({
     ]) {
       if (path) {
         await exec
-          .getExecOutput("md5sum", [path])
+          .getExecOutput("md5sum", [path], { silent: true })
           .then(({ stdout }) => {
             hashes[file!] = stdout.split(" ")[0];
           })

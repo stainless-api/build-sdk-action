@@ -77,7 +77,7 @@ inputs:
       The Stainless branch name that was merged. This should be the same as the
       preview action's `branch` input.
     required: false
-    default: ${{ 'preview/{0}'.format(github.event.pull_request.head.ref) }}
+    default: ${{ format('preview/{0}', github.event.pull_request.head.ref) }}
 
 outputs:
   outcomes:

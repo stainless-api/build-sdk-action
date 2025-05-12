@@ -1,4 +1,10 @@
-import { getBooleanInput, getInput, setOutput } from "@actions/core";
+import {
+  endGroup,
+  getBooleanInput,
+  getInput,
+  setOutput,
+  startGroup,
+} from "@actions/core";
 import { StainlessV0 as Stainless } from "stainless";
 import { isConfigChanged } from "./config";
 import { checkResults, runBuilds } from "./build";
@@ -45,6 +51,8 @@ async function main() {
       return;
     }
 
+    startGroup("Running builds");
+
     const builds = await runBuilds({
       stainless,
       projectName,
@@ -59,7 +67,11 @@ async function main() {
 
     setOutput("outcomes", outcomes);
 
-    if (orgName && githubToken) {
+    endGroup();
+
+    if (makeComment) {
+      startGroup("Creating comment");
+
       const commentBody = generateMergeComment({
         outcomes,
         orgName,
@@ -67,6 +79,8 @@ async function main() {
       });
 
       await upsertComment({ body: commentBody, token: githubToken });
+
+      endGroup();
     }
 
     if (!checkResults({ outcomes, failRunOn })) {

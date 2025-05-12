@@ -160,6 +160,11 @@ export async function upsertComment({
 }) {
   const octokit = github.getOctokit(token);
 
+  console.log(
+    "Upserting comment on PR:",
+    github.context.payload.pull_request!.number,
+  );
+
   const { data: comments } = await octokit.rest.issues.listComments({
     owner: github.context.repo.owner,
     repo: github.context.repo.repo,
@@ -172,12 +177,15 @@ export async function upsertComment({
   );
 
   if (previewComment) {
-    await octokit.rest.issues.deleteComment({
+    console.log("Updating existing comment:", previewComment.id);
+    await octokit.rest.issues.updateComment({
       owner: github.context.repo.owner,
       repo: github.context.repo.repo,
       comment_id: previewComment.id,
+      body,
     });
   } else {
+    console.log("Creating new comment");
     await octokit.rest.issues.createComment({
       owner: github.context.repo.owner,
       repo: github.context.repo.repo,

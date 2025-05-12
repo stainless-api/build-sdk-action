@@ -25700,7 +25700,12 @@ async function runBuilds({ stainless, projectName, parentRevisions = [], mergeBr
         throw new Error("If guess_config is true, must have oas_path and no config_path");
     }
     if (commitMessage && !isValidConventionalCommitMessage(commitMessage)) {
-        throw new Error(`Invalid commit message: ${commitMessage}. Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/`);
+        if (branch === "main") {
+            throw new Error(`Invalid commit message: "${commitMessage}". Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/`);
+        }
+        else {
+            console.warn(`Commit message: "${commitMessage}" is not in Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/, using anyway`);
+        }
     }
     const parentBuilds = await findParentBuilds({
         stainless,
@@ -30536,7 +30541,7 @@ async function main() {
         const apiKey = (0, core_1.getInput)("stainless_api_key", { required: true });
         const oasPath = (0, core_1.getInput)("oas_path", { required: false }) || undefined;
         const configPath = (0, core_1.getInput)("config_path", { required: false }) || undefined;
-        const projectName = (0, core_1.getInput)("project_name", { required: true });
+        const projectName = (0, core_1.getInput)("project", { required: true });
         const commitMessage = (0, core_1.getInput)("commit_message", { required: false }) || undefined;
         const guessConfig = (0, core_1.getBooleanInput)("guess_config", { required: false });
         const branch = (0, core_1.getInput)("branch", { required: false }) || undefined;

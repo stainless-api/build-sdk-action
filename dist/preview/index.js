@@ -29972,7 +29972,12 @@ async function runBuilds({ stainless, projectName, parentRevisions = [], mergeBr
         throw new Error("If guess_config is true, must have oas_path and no config_path");
     }
     if (commitMessage && !isValidConventionalCommitMessage(commitMessage)) {
-        throw new Error(`Invalid commit message: ${commitMessage}. Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/`);
+        if (branch === "main") {
+            throw new Error(`Invalid commit message: "${commitMessage}". Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/`);
+        }
+        else {
+            console.warn(`Commit message: "${commitMessage}" is not in Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/, using anyway`);
+        }
     }
     const parentBuilds = await findParentBuilds({
         stainless,
@@ -30345,6 +30350,7 @@ ${header}${tableRows}
 }
 async function upsertComment({ body, token, }) {
     const octokit = github.getOctokit(token);
+    console.log("Upserting comment on PR:", github.context.payload.pull_request.number);
     const { data: comments } = await octokit.rest.issues.listComments({
         owner: github.context.repo.owner,
         repo: github.context.repo.repo,
@@ -30353,13 +30359,16 @@ async function upsertComment({ body, token, }) {
     const firstLine = body.trim().split("\n")[0];
     const previewComment = comments.find((comment) => comment.body?.includes(firstLine));
     if (previewComment) {
-        await octokit.rest.issues.deleteComment({
+        console.log("Updating existing comment:", previewComment.id);
+        await octokit.rest.issues.updateComment({
             owner: github.context.repo.owner,
             repo: github.context.repo.repo,
             comment_id: previewComment.id,
+            body,
         });
     }
     else {
+        console.log("Creating new comment");
         await octokit.rest.issues.createComment({
             owner: github.context.repo.owner,
             repo: github.context.repo.repo,
@@ -30477,46 +30486,113 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core_1 = __nccwpck_require__(7484);
 const exec = __importStar(__nccwpck_require__(5236));
-const github = __importStar(__nccwpck_require__(3228));
 const stainless_1 = __nccwpck_require__(7863);
 const build_1 = __nccwpck_require__(4323);
 const config_1 = __nccwpck_require__(2973);
 const comment_1 = __nccwpck_require__(2246);
-async function getParentCommits() {
-    // Get HEAD and BASE shas
-    const HEAD = github.context.payload.pull_request.head.sha;
-    const BASE = github.context.payload.pull_request.base.sha;
-    await exec.exec("git", ["fetch", "--depth=1", "origin", BASE]);
+async function main() {
+    try {
+        const apiKey = (0, core_1.getInput)("stainless_api_key", { required: true });
+        const orgName = (0, core_1.getInput)("org", { required: true });
+        const projectName = (0, core_1.getInput)("project", { required: true });
+        const oasPath = (0, core_1.getInput)("oas_path", { required: true });
+        const configPath = (0, core_1.getInput)("config_path", { required: false }) || undefined;
+        const commitMessage = (0, core_1.getInput)("commit_message", { required: true });
+        const failRunOn = (0, core_1.getInput)("fail_on", { required: true }) || "error";
+        const makeComment = (0, core_1.getBooleanInput)("make_comment", { required: true });
+        const githubToken = (0, core_1.getInput)("github_token", { required: false });
+        const baseSha = (0, core_1.getInput)("base_sha", { required: true });
+        const baseRef = (0, core_1.getInput)("base_ref", { required: true });
+        const defaultBranch = (0, core_1.getInput)("default_branch", { required: true });
+        const headSha = (0, core_1.getInput)("head_sha", { required: true });
+        const branch = (0, core_1.getInput)("branch", { required: true });
+        if (makeComment && !githubToken) {
+            throw new Error("github_token is required to make a comment");
+        }
+        const stainless = new stainless_1.StainlessV0({ apiKey, logLevel: "warn" });
+        (0, core_1.startGroup)("Getting parent revision");
+        const { mergeBaseSha, nonMainBaseRef } = await getParentCommits({
+            baseSha,
+            headSha,
+            baseRef,
+            defaultBranch,
+        });
+        const configChanged = await (0, config_1.isConfigChanged)({
+            before: mergeBaseSha,
+            after: headSha,
+            oasPath,
+            configPath,
+        });
+        if (!configChanged) {
+            console.log("No config files changed, skipping preview");
+            return;
+        }
+        const parentRevisions = await computeParentRevisions({
+            mergeBaseSha,
+            nonMainBaseRef,
+            oasPath,
+            configPath,
+        });
+        (0, core_1.endGroup)();
+        (0, core_1.startGroup)("Running builds");
+        // Checkout HEAD for runBuilds to pull the files of:
+        await exec.exec("git", ["checkout", headSha], { silent: true });
+        const builds = await (0, build_1.runBuilds)({
+            stainless,
+            oasPath,
+            configPath,
+            projectName,
+            parentRevisions,
+            branch,
+            guessConfig: !configPath,
+            commitMessage,
+        });
+        const outcomes = builds.outcomes;
+        const parentOutcomes = builds.parentOutcomes?.find(Boolean);
+        (0, core_1.setOutput)("outcomes", outcomes);
+        (0, core_1.setOutput)("parent_outcomes", parentOutcomes);
+        (0, core_1.endGroup)();
+        if (makeComment) {
+            (0, core_1.startGroup)("Creating comment");
+            const commentBody = (0, comment_1.generatePreviewComment)({
+                outcomes,
+                parentOutcomes,
+                orgName,
+                projectName,
+            });
+            await (0, comment_1.upsertComment)({ body: commentBody, token: githubToken });
+            (0, core_1.endGroup)();
+        }
+        if (!(0, build_1.checkResults)({ outcomes, failRunOn })) {
+            process.exit(1);
+        }
+    }
+    catch (error) {
+        console.error("Error in preview action:", error);
+        process.exit(1);
+    }
+}
+async function getParentCommits({ baseSha, headSha, baseRef, defaultBranch, }) {
+    await exec.exec("git", ["fetch", "--depth=1", "origin", baseSha], {
+        silent: true,
+    });
     let mergeBaseSha;
     for (let attempt = 0; attempt < 10; attempt++) {
         try {
-            const output = await exec.getExecOutput("git", [
-                "merge-base",
-                HEAD,
-                BASE,
-            ]);
+            const output = await exec.getExecOutput("git", ["merge-base", headSha, baseSha], { silent: true });
             mergeBaseSha = output.stdout.trim();
             if (mergeBaseSha)
                 break;
         }
         catch { }
         // deepen fetch until we find merge base
-        await exec.exec("git", [
-            "fetch",
-            "--quiet",
-            "--deepen=10",
-            "origin",
-            BASE,
-            HEAD,
-        ]);
+        await exec.exec("git", ["fetch", "--quiet", "--deepen=10", "origin", baseSha, headSha], { silent: true });
     }
     if (!mergeBaseSha) {
         throw new Error("Could not determine merge base SHA");
     }
     console.log(`Merge base: ${mergeBaseSha}`);
     let nonMainBaseRef;
-    const baseRef = github.context.payload.pull_request.base.ref;
-    const defaultBranch = github.context.payload.repository.default_branch;
     if (baseRef !== defaultBranch) {
         nonMainBaseRef = `preview/${baseRef}`;
         console.log(`Non-main base ref: ${nonMainBaseRef}`);
@@ -30527,14 +30603,14 @@ async function computeParentRevisions({ mergeBaseSha, nonMainBaseRef, oasPath, c
     const result = [];
     if (mergeBaseSha) {
         let hashes = {};
-        await exec.exec("git", ["checkout", mergeBaseSha]);
+        await exec.exec("git", ["checkout", mergeBaseSha], { silent: true });
         for (const [path, file] of [
             [oasPath, "openapi.yml"],
             [configPath, "openapi.stainless.yml"],
         ]) {
             if (path) {
                 await exec
-                    .getExecOutput("md5sum", [path])
+                    .getExecOutput("md5sum", [path], { silent: true })
                     .then(({ stdout }) => {
                     hashes[file] = stdout.split(" ")[0];
                 })
@@ -30549,72 +30625,8 @@ async function computeParentRevisions({ mergeBaseSha, nonMainBaseRef, oasPath, c
         result.push(nonMainBaseRef);
     }
     result.push("main");
-    await exec.exec("git", [
-        "checkout",
-        github.context.payload.pull_request.head.sha,
-    ]);
     console.log("Parent revisions:", result);
     return result;
-}
-async function main() {
-    try {
-        // Get inputs
-        const apiKey = (0, core_1.getInput)("stainless_api_key", { required: true });
-        const oasPath = (0, core_1.getInput)("oas_path", { required: true });
-        const configPath = (0, core_1.getInput)("config_path", { required: false }) || undefined;
-        const projectName = (0, core_1.getInput)("project_name", { required: true });
-        const orgName = (0, core_1.getInput)("org_name", { required: false });
-        const failRunOn = (0, core_1.getInput)("fail_run_on", { required: true }) || "error";
-        const githubToken = (0, core_1.getInput)("github_token", { required: false });
-        const stainless = new stainless_1.StainlessV0({ apiKey, logLevel: "warn" });
-        const { mergeBaseSha, nonMainBaseRef } = await getParentCommits();
-        const configChanged = await (0, config_1.isConfigChanged)({
-            before: mergeBaseSha,
-            after: github.context.payload.pull_request.head.sha,
-            oasPath,
-            configPath,
-        });
-        if (!configChanged) {
-            console.log("No config files changed, skipping preview");
-            return;
-        }
-        const parentRevisions = await computeParentRevisions({
-            mergeBaseSha,
-            nonMainBaseRef,
-            oasPath,
-            configPath,
-        });
-        const builds = await (0, build_1.runBuilds)({
-            stainless,
-            oasPath,
-            configPath,
-            projectName,
-            parentRevisions,
-            branch: `preview/${github.context.payload.pull_request.head.ref}`,
-            guessConfig: !configPath,
-            commitMessage: github.context.payload.pull_request.title,
-        });
-        const outcomes = builds.outcomes;
-        const parentOutcomes = builds.parentOutcomes?.find(Boolean);
-        (0, core_1.setOutput)("outcomes", outcomes);
-        (0, core_1.setOutput)("parent_outcomes", parentOutcomes);
-        if (orgName && githubToken) {
-            const commentBody = (0, comment_1.generatePreviewComment)({
-                outcomes,
-                parentOutcomes,
-                orgName,
-                projectName,
-            });
-            await (0, comment_1.upsertComment)({ body: commentBody, token: githubToken });
-        }
-        if (!(0, build_1.checkResults)({ outcomes, failRunOn })) {
-            process.exit(1);
-        }
-    }
-    catch (error) {
-        console.error("Error in preview action:", error);
-        process.exit(1);
-    }
 }
 main();
 
