@@ -50,9 +50,15 @@ export async function runBuilds({
     );
   }
   if (commitMessage && !isValidConventionalCommitMessage(commitMessage)) {
-    throw new Error(
-      `Invalid commit message: ${commitMessage}. Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/`,
-    );
+    if (branch === "main") {
+      throw new Error(
+        `Invalid commit message: "${commitMessage}". Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/`,
+      );
+    } else {
+      console.warn(
+        `Commit message: "${commitMessage}" is not in Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/, using anyway`,
+      );
+    }
   }
 
   const parentBuilds = await findParentBuilds({

@@ -1,17 +1,112 @@
-import { getInput, setOutput } from "@actions/core";
+import { getBooleanInput, getInput, setOutput } from "@actions/core";
 import * as exec from "@actions/exec";
-import * as github from "@actions/github";
 import { StainlessV0 as Stainless } from "stainless";
 import { checkResults, runBuilds } from "./build";
 import { isConfigChanged } from "./config";
 import { generatePreviewComment, upsertComment } from "./comment";
 
-async function getParentCommits() {
-  // Get HEAD and BASE shas
-  const HEAD = github.context.payload.pull_request!.head.sha;
-  const BASE = github.context.payload.pull_request!.base.sha;
+async function main() {
+  try {
+    const apiKey = getInput("stainless_api_key", { required: true });
+    const orgName = getInput("org", { required: true });
+    const projectName = getInput("project", { required: true });
+    const oasPath = getInput("oas_path", { required: true });
+    const configPath =
+      getInput("config_path", { required: false }) || undefined;
+    const commitMessage = getInput("commit_message", { required: true });
+    const failRunOn = getInput("fail_on", { required: true }) || "error";
+    const makeComment = getBooleanInput("make_comment", { required: true });
+    const githubToken = getInput("github_token", { required: false });
+    const baseSha = getInput("base_sha", { required: true });
+    const baseRef = getInput("base_ref", { required: true });
+    const defaultBranch = getInput("default_branch", { required: true });
+    const headSha = getInput("head_sha", { required: true });
+    const branch = getInput("branch", { required: true });
 
-  await exec.exec("git", ["fetch", "--depth=1", "origin", BASE]);
+    if (makeComment && !githubToken) {
+      throw new Error("github_token is required to make a comment");
+    }
+
+    const stainless = new Stainless({ apiKey, logLevel: "warn" });
+
+    const { mergeBaseSha, nonMainBaseRef } = await getParentCommits({
+      baseSha,
+      headSha,
+      baseRef,
+      defaultBranch,
+    });
+
+    const configChanged = await isConfigChanged({
+      before: mergeBaseSha,
+      after: headSha,
+      oasPath,
+      configPath,
+    });
+
+    if (!configChanged) {
+      console.log("No config files changed, skipping preview");
+      return;
+    }
+
+    const parentRevisions = await computeParentRevisions({
+      mergeBaseSha,
+      nonMainBaseRef,
+      oasPath,
+      configPath,
+    });
+
+    // Checkout HEAD for runBuilds to pull the files of:
+    await exec.exec("git", ["checkout", headSha]);
+
+    const builds = await runBuilds({
+      stainless,
+      oasPath,
+      configPath,
+      projectName,
+      parentRevisions,
+      branch,
+      guessConfig: !configPath,
+      commitMessage,
+    });
+
+    const outcomes = builds.outcomes!;
+    const parentOutcomes = builds.parentOutcomes?.find(Boolean);
+
+    setOutput("outcomes", outcomes);
+    setOutput("parent_outcomes", parentOutcomes);
+
+    if (makeComment) {
+      const commentBody = generatePreviewComment({
+        outcomes,
+        parentOutcomes,
+        orgName,
+        projectName,
+      });
+
+      await upsertComment({ body: commentBody, token: githubToken });
+    }
+
+    if (!checkResults({ outcomes, failRunOn })) {
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error("Error in preview action:", error);
+    process.exit(1);
+  }
+}
+
+async function getParentCommits({
+  baseSha,
+  headSha,
+  baseRef,
+  defaultBranch,
+}: {
+  baseSha: string;
+  headSha: string;
+  baseRef: string;
+  defaultBranch: string;
+}) {
+  await exec.exec("git", ["fetch", "--depth=1", "origin", baseSha]);
 
   let mergeBaseSha;
 
@@ -19,8 +114,8 @@ async function getParentCommits() {
     try {
       const output = await exec.getExecOutput("git", [
         "merge-base",
-        HEAD,
-        BASE,
+        headSha,
+        baseSha,
       ]);
       mergeBaseSha = output.stdout.trim();
       if (mergeBaseSha) break;
@@ -32,8 +127,8 @@ async function getParentCommits() {
       "--quiet",
       "--deepen=10",
       "origin",
-      BASE,
-      HEAD,
+      baseSha,
+      headSha,
     ]);
   }
 
@@ -44,8 +139,6 @@ async function getParentCommits() {
   console.log(`Merge base: ${mergeBaseSha}`);
 
   let nonMainBaseRef;
-  const baseRef = github.context.payload.pull_request!.base.ref;
-  const defaultBranch = github.context.payload.repository!.default_branch;
 
   if (baseRef !== defaultBranch) {
     nonMainBaseRef = `preview/${baseRef}`;
@@ -98,85 +191,9 @@ async function computeParentRevisions({
 
   result.push("main");
 
-  await exec.exec("git", [
-    "checkout",
-    github.context.payload.pull_request!.head.sha,
-  ]);
   console.log("Parent revisions:", result);
 
   return result;
-}
-
-async function main() {
-  try {
-    // Get inputs
-    const apiKey = getInput("stainless_api_key", { required: true });
-    const oasPath = getInput("oas_path", { required: true });
-    const configPath =
-      getInput("config_path", { required: false }) || undefined;
-    const projectName = getInput("project_name", { required: true });
-    const orgName = getInput("org_name", { required: false });
-    const failRunOn = getInput("fail_run_on", { required: true }) || "error";
-    const githubToken = getInput("github_token", { required: false });
-
-    const stainless = new Stainless({ apiKey, logLevel: "warn" });
-
-    const { mergeBaseSha, nonMainBaseRef } = await getParentCommits();
-
-    const configChanged = await isConfigChanged({
-      before: mergeBaseSha,
-      after: github.context.payload.pull_request!.head.sha,
-      oasPath,
-      configPath,
-    });
-
-    if (!configChanged) {
-      console.log("No config files changed, skipping preview");
-      return;
-    }
-
-    const parentRevisions = await computeParentRevisions({
-      mergeBaseSha,
-      nonMainBaseRef,
-      oasPath,
-      configPath,
-    });
-
-    const builds = await runBuilds({
-      stainless,
-      oasPath,
-      configPath,
-      projectName,
-      parentRevisions,
-      branch: `preview/${github.context.payload.pull_request!.head.ref}`,
-      guessConfig: !configPath,
-      commitMessage: github.context.payload.pull_request!.title,
-    });
-
-    const outcomes = builds.outcomes!;
-    const parentOutcomes = builds.parentOutcomes?.find(Boolean);
-
-    setOutput("outcomes", outcomes);
-    setOutput("parent_outcomes", parentOutcomes);
-
-    if (orgName && githubToken) {
-      const commentBody = generatePreviewComment({
-        outcomes,
-        parentOutcomes,
-        orgName,
-        projectName,
-      });
-
-      await upsertComment({ body: commentBody, token: githubToken });
-    }
-
-    if (!checkResults({ outcomes, failRunOn })) {
-      process.exit(1);
-    }
-  } catch (error) {
-    console.error("Error in preview action:", error);
-    process.exit(1);
-  }
 }
 
 main();

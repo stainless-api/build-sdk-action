@@ -8,7 +8,7 @@ async function main() {
     const oasPath = getInput("oas_path", { required: false }) || undefined;
     const configPath =
       getInput("config_path", { required: false }) || undefined;
-    const projectName = getInput("project_name", { required: true });
+    const projectName = getInput("project", { required: true });
     const commitMessage =
       getInput("commit_message", { required: false }) || undefined;
     const guessConfig = getBooleanInput("guess_config", { required: false });

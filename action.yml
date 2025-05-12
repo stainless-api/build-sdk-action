@@ -1,5 +1,5 @@
-name: Stainless — Build SDK specification
-description: Create a new SDK build, either on a preview branch or on the main branch
+name: Stainless — Build SDK
+description: Build SDKs
 branding:
   icon: book-open
   color: green
@@ -8,28 +8,31 @@ runs:
   main: dist/index.js
 inputs:
   stainless_api_key:
-    description: "Stainless API key."
+    description: Stainless API key.
+    required: true
+  project:
+    description: Stainless project name.
     required: true
   oas_path:
-    description: "Path to the OpenAPI file."
+    description: Path to your OpenAPI spec.
     required: false
   config_path:
-    description: "Path to the Stainless config file."
+    description: Path to your Stainless config.
     required: false
-  project_name:
-    description: "Stainless project name."
-    required: true
   commit_message:
-    description: "Commit message to use in the commits in the SDK repo."
+    description: >-
+      Commit message to use in the commits in the SDK repo. Use a commit
+      message in the conventional commits format:
+      https://www.conventionalcommits.org/en/v1.0.0/
     required: false
   guess_config:
-    description: "If true, regenerate the endpoints in the Stainless config file."
+    description: If true, regenerate the endpoints in the Stainless config file.
     required: false
   branch:
-    description: "Branch to create the build on."
+    description: Branch to create the build on.
     required: false
   merge_branch:
-    description: "Branch that this build is merging in changes from."
+    description: Branch that this build is merging in changes from.
     required: false
   parent_revision:
     description: >-
