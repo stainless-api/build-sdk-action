@@ -29,26 +29,55 @@ inputs:
     description: If true, regenerate the endpoints in the Stainless config file.
     required: false
   branch:
-    description: Branch to create the build on.
+    description: Stainless branch to create the build on.
     required: false
   merge_branch:
-    description: Branch that this build is merging in changes from.
+    description: Stainless branch that this build is merging in changes from.
     required: false
-  parent_revision:
+  base_revision:
     description: >-
-      JSON-stringified array of parent revisions. Each entry in the array must
-      be either a branch name, or an object with keys as file names and values
-      as md5 hashes. The first matching revision that has a build will be the
-      build that this build is pushed onto.
+      A base revision to compare this build against. Must be a config commit
+      SHA. Cannot be specified if `merge_branch` is specified.
+    required: false
+  base_branch:
+    description: >-
+      Stainless branch to create the base build on. Must be specified if
+      `base_revision` is specified.
     required: false
 outputs:
   outcomes:
     description: >-
       JSON-stringified object of build outcomes. Keys are languages, and values
-      contain the `commit` result of the build for that language.
-  parent_outcomes:
+      contain the `commit` result of the build for that language. Will look
+      like:
+
+      ```
+      {
+        "typescript": {
+          "conclusion": "success",
+          "commit": {
+            "sha": "...",
+            ...
+          },
+        },
+        ...
+      }
+      ```
+  base_outcomes:
     description: >-
-      JSON-stringified array, where each entry is an object of parent revision
-      build outcomes. Entries may be null if no matching parent build was found.
-      Keys are languages, and values contain the `commit` result of the build
-      for that language.
+      JSON-stringified object of base build outcomes. Present when
+      `base_revision` is specified. Keys are languages, and values contain the
+      `commit` result of the build for that language. Will look like:
+
+      ```
+      {
+        "typescript": {
+          "conclusion": "success",
+          "commit": {
+            "sha": "...",
+            ...
+          },
+        },
+        ...
+      }
+      ```

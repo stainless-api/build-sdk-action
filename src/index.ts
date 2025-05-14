@@ -15,44 +15,18 @@ async function main() {
     const branch = getInput("branch", { required: false }) || undefined;
     const mergeBranch =
       getInput("merge_branch", { required: false }) || undefined;
-    const parentRevisionRaw =
-      getInput("parent_revision", { required: false }) || undefined;
-
-    const parentRevisionArray = (() => {
-      if (!parentRevisionRaw) {
-        return [];
-      }
-      const result = JSON.parse(parentRevisionRaw);
-      if (!Array.isArray(result)) {
-        throw new Error("parent_revision must be an array");
-      }
-      if (
-        !result.every(
-          (x) =>
-            typeof x === "string" ||
-            (typeof x === "object" &&
-              Object.entries(x).every(
-                ([key, value]) =>
-                  typeof key === "string" && typeof value === "string",
-              )),
-        )
-      ) {
-        throw new Error(
-          "parent_revision must be an array of strings or objects with string keys and string values",
-        );
-      }
-      if (branch === "main" && result.length > 0) {
-        throw new Error("parent_revision must be empty when branch is 'main'");
-      }
-      return result as Array<string | { [filepath: string]: string }>;
-    })();
+    const baseRevision =
+      getInput("base_revision", { required: false }) || undefined;
+    const baseBranch =
+      getInput("base_branch", { required: false }) || undefined;
 
     const stainless = new Stainless({ apiKey, logLevel: "warn" });
 
-    const { parentOutcomes, outcomes } = await runBuilds({
+    const { baseOutcomes, outcomes } = await runBuilds({
       stainless,
       projectName,
-      parentRevisions: parentRevisionArray,
+      baseRevision,
+      baseBranch,
       mergeBranch,
       branch,
       oasPath,
@@ -62,7 +36,7 @@ async function main() {
     });
 
     setOutput("outcomes", outcomes);
-    setOutput("parent_outcomes", parentOutcomes);
+    setOutput("base_outcomes", baseOutcomes);
   } catch (error) {
     console.error("Error interacting with API:", error);
     process.exit(1);
