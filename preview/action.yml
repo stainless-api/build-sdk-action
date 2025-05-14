@@ -49,20 +49,24 @@ inputs:
   # We think it's unlikely you'll need to use non-default inputs for these:
   base_sha:
     description: >-
-      The base SHA for the pull request. Used to find a parent build.
+      The base SHA for the pull request. Used to create a base build.
     required: false
     default: ${{ github.event.pull_request.base.sha }}
   base_ref:
     description: >-
-      The branch the pull request will be merged into. Used to find a parent
-      build, if no build matches the base SHA.
+      The branch the pull request will be merged into. Used to create a base
+      build, if no existing build matches the base SHA.
     required: false
     default: ${{ github.event.pull_request.base.ref }}
+  base_branch:
+    description: The Stainless branch name of the base build.
+    required: false
+    default: ${{ format('preview/base/{0}', github.event.pull_request.head.ref) }}
   default_branch:
     description: >-
       The branch of the repository that the `main` Stainless branch of your
       project gets its OpenAPI spec from. This is usually the default branch of
-      your repository. Used to find a parent build, if no build matches the
+      your repository. Used to find a base build, if no build matches the
       base SHA or base ref.
     required: false
     default: ${{ github.event.repository.default_branch }}
@@ -98,11 +102,11 @@ outputs:
         ...
       }
       ```
-  parent_outcomes:
+  base_outcomes:
     description: >-
-      JSON-stringified object of the parent build outcomes. May be null if no
-      matching parent build was found. Keys are languages, and values contain
-      the `commit` result of the build for that language. Will look like:
+      JSON-stringified object of the base build outcomes. Keys are languages,
+      and values contain the `commit` result of the build for that language.
+      Will look like:
 
       ```
       {

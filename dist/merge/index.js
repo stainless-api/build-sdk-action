@@ -29957,19 +29957,22 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.runBuilds = runBuilds;
 exports.checkResults = checkResults;
 const fs = __importStar(__nccwpck_require__(9896));
-const stainless_1 = __nccwpck_require__(7863);
 // https://www.conventionalcommits.org/en/v1.0.0/
 const CONVENTIONAL_COMMIT_REGEX = new RegExp(/^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\(.*\))?(!?): .*$/);
 const isValidConventionalCommitMessage = (message) => {
     return CONVENTIONAL_COMMIT_REGEX.test(message);
 };
+const POLLING_INTERVAL_SECONDS = 5;
 const MAX_POLLING_SECONDS = 10 * 60; // 10 minutes
-async function runBuilds({ stainless, projectName, parentRevisions = [], mergeBranch, branch, oasPath, configPath, guessConfig = false, commitMessage, }) {
+async function runBuilds({ stainless, projectName, baseRevision, baseBranch, mergeBranch, branch, oasPath, configPath, guessConfig = false, commitMessage, }) {
     if (mergeBranch && (oasPath || configPath)) {
         throw new Error("Cannot specify both merge_branch and oas_path or config_path");
     }
     if (guessConfig && (configPath || !oasPath)) {
         throw new Error("If guess_config is true, must have oas_path and no config_path");
+    }
+    if (baseRevision && mergeBranch) {
+        throw new Error("Cannot specify both base_revision and merge_branch");
     }
     if (commitMessage && !isValidConventionalCommitMessage(commitMessage)) {
         if (branch === "main") {
@@ -29979,50 +29982,67 @@ async function runBuilds({ stainless, projectName, parentRevisions = [], mergeBr
             console.warn(`Commit message: "${commitMessage}" is not in Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/, using anyway`);
         }
     }
-    const parentBuilds = await findParentBuilds({
-        stainless,
-        projectName,
-        parentRevisions,
-    });
-    const parentBuild = parentBuilds.find(Boolean);
     const oasContent = oasPath ? fs.readFileSync(oasPath, "utf-8") : undefined;
     let configContent = configPath
         ? fs.readFileSync(configPath, "utf-8")
         : undefined;
-    if (await shouldResetBranch({
-        stainless,
-        projectName,
-        parentBuild,
-        branch,
-    })) {
-        if (!configContent) {
-            if (guessConfig) {
-                console.log("Guessing config before branch reset");
-                configContent = Object.values(await stainless.projects.configs.guess(projectName, {
-                    branch,
-                    spec: oasContent,
-                }))[0]?.content;
-            }
-            else {
-                console.log("Saving config before branch reset");
-                configContent = Object.values(await stainless.projects.configs.retrieve(projectName, {
-                    branch,
-                }))[0]?.content;
-            }
-        }
-        console.log("Hard resetting branch", branch);
-        await stainless.projects.branches.create(projectName, {
-            branch_from: parentBuild.config_commit,
-            branch: branch,
-            force: true,
+    if (!baseRevision) {
+        const build = await stainless.builds.create({
+            project: projectName,
+            revision: mergeBranch
+                ? `${branch}..${mergeBranch}`
+                : {
+                    ...(oasContent && {
+                        "openapi.yml": {
+                            content: oasContent,
+                        },
+                    }),
+                    ...(configContent && {
+                        "openapi.stainless.yml": {
+                            content: configContent,
+                        },
+                    }),
+                },
+            branch,
+            commit_message: commitMessage,
+            allow_empty: true,
         });
+        return {
+            baseOutcomes: null,
+            outcomes: await pollBuild({ stainless, build }),
+        };
     }
-    // create a new build
-    const build = await stainless.builds.create({
+    if (!configContent) {
+        if (guessConfig) {
+            console.log("Guessing config before branch reset");
+            configContent = Object.values(await stainless.projects.configs.guess(projectName, {
+                branch,
+                spec: oasContent,
+            }))[0]?.content;
+        }
+        else {
+            console.log("Saving config before branch reset");
+            configContent = Object.values(await stainless.projects.configs.retrieve(projectName, {
+                branch,
+            }))[0]?.content;
+        }
+    }
+    console.log(`Hard resetting ${branch} to ${baseRevision}`);
+    const { config_commit } = await stainless.projects.branches.create(projectName, {
+        branch_from: baseRevision,
+        branch: branch,
+        force: true,
+    });
+    console.log(`Hard reset ${branch}, now at ${config_commit}`);
+    const { base, head } = await stainless.builds.compare({
         project: projectName,
-        revision: mergeBranch
-            ? `${branch}..${mergeBranch}`
-            : {
+        base: {
+            revision: baseRevision,
+            branch: baseBranch,
+            commit_message: commitMessage,
+        },
+        head: {
+            revision: {
                 ...(oasContent && {
                     "openapi.yml": {
                         content: oasContent,
@@ -30034,133 +30054,59 @@ async function runBuilds({ stainless, projectName, parentRevisions = [], mergeBr
                     },
                 }),
             },
-        branch,
-        commit_message: commitMessage,
-        allow_empty: true,
+            branch,
+            commit_message: commitMessage,
+        },
     });
-    const { outcomes, parentOutcomes } = await pollBuilds({
-        stainless,
-        parentBuilds,
-        build,
-    });
-    return { outcomes, parentOutcomes };
+    const results = await Promise.all([
+        pollBuild({ stainless, build: base }),
+        pollBuild({ stainless, build: head }),
+    ]);
+    return {
+        baseOutcomes: results[0],
+        outcomes: results[1],
+    };
 }
-async function findParentBuilds({ stainless, projectName, parentRevisions, }) {
-    const parentBuilds = await Promise.all(parentRevisions.map(async (parentRevision) => {
-        console.log("Searching for build against", parentRevision);
-        const parentBuild = (await stainless.builds.list({
-            project: projectName,
-            limit: 1,
-            ...(typeof parentRevision === "string"
-                ? { branch: parentRevision }
-                : {
-                    revision: Object.fromEntries(Object.entries(parentRevision).map(([key, hash]) => [
-                        key,
-                        { hash },
-                    ])),
-                }),
-        })).data[0];
-        return parentBuild ?? null;
-    }));
-    const parentBuild = parentBuilds.find(Boolean);
-    console.log("Parent builds found:", parentBuilds.length);
-    if (parentBuild) {
-        console.log("Using parent build:", parentBuild.id);
-    }
-    else {
-        console.log("No parent build found");
-    }
-    return parentBuilds;
-}
-async function shouldResetBranch({ stainless, projectName, parentBuild, branch, }) {
-    if (!(parentBuild && branch)) {
-        return false;
-    }
-    let previousBuild;
-    try {
-        previousBuild = (await stainless.projects.branches.retrieve(branch, {
-            project: projectName,
-        }))?.latest_build;
-    }
-    catch (error) {
-        if (error instanceof stainless_1.StainlessV0.NotFoundError) {
-            console.log("Branch not found, creating it against", parentBuild.config_commit);
-            await stainless.projects.branches.create(projectName, {
-                branch_from: parentBuild.config_commit,
-                branch,
-            });
-        }
-        else {
-            throw error;
-        }
-    }
-    if (previousBuild?.id) {
-        console.log("Previous build against branch found:", previousBuild.id);
-        if (previousBuild.id === parentBuild.id) {
-            console.log("Branch already up to date");
-        }
-        else {
-            return true;
-        }
-    }
-    return false;
-}
-async function pollBuilds({ stainless, parentBuilds, build, maxPollingSeconds = MAX_POLLING_SECONDS, }) {
+async function pollBuild({ stainless, build, pollingIntervalSeconds = POLLING_INTERVAL_SECONDS, maxPollingSeconds = MAX_POLLING_SECONDS, }) {
     let buildId = build.id;
     let languages = Object.keys(build.targets);
     if (buildId) {
-        console.log(`Created build with ID ${buildId} for languages: ${languages.join(", ")}`);
+        console.log(`[${buildId}] Created build against ${build.config_commit} for languages: ${languages.join(", ")}`);
     }
     else {
         console.log(`No new build was created; exiting.`);
         return {};
     }
-    let parentOutcomes = [];
     let outcomes = {};
     const pollingStart = Date.now();
     while (Object.keys(outcomes).length < languages.length &&
         Date.now() - pollingStart < maxPollingSeconds * 1000) {
         for (const language of languages) {
-            for (const [i, parentBuild] of parentBuilds.entries()) {
-                if (!parentOutcomes[i]) {
-                    parentOutcomes[i] = {};
-                }
-                if (parentBuild && !(language in parentOutcomes[i])) {
-                    const parentBuildOutput = parentBuild.targets[language];
-                    if (parentBuildOutput?.commit.status === "completed") {
-                        const parentOutcome = parentBuildOutput?.commit;
-                        console.log(`Parent build ${i + 1} completed with outcome:`, JSON.stringify(parentOutcome));
-                        parentOutcomes[i][language] = parentOutcome.completed;
-                    }
-                    else {
-                        console.log(`Parent build ${i + 1} has status ${parentBuildOutput?.commit.status} for ${language}`);
-                    }
-                }
-            }
             if (!(language in outcomes)) {
                 const buildOutput = (await stainless.builds.retrieve(buildId)).targets[language];
                 if (buildOutput?.commit.status === "completed") {
                     const outcome = buildOutput?.commit;
-                    console.log("Build completed with outcome:", JSON.stringify(outcome));
+                    console.log(`[${buildId}] Build completed for ${language} with outcome:`, JSON.stringify(outcome));
                     outcomes[language] = outcome.completed;
                 }
                 else {
-                    console.log(`Build has status ${buildOutput?.commit.status} for ${language}`);
+                    console.log(`[${buildId}] Build for ${language} has status ${buildOutput?.commit.status}`);
                 }
             }
         }
         // wait a bit before polling again
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        await new Promise((resolve) => setTimeout(resolve, pollingIntervalSeconds * 1000));
     }
     const languagesWithoutOutcome = languages.filter((language) => !(language in outcomes));
     for (const language of languagesWithoutOutcome) {
+        console.log(`[${buildId}] Build for ${language} timed out after ${maxPollingSeconds} seconds`);
         outcomes[language] = {
             conclusion: "timed_out",
             commit: null,
             merge_conflict_pr: null,
         };
     }
-    return { outcomes, parentOutcomes };
+    return outcomes;
 }
 function checkResults({ outcomes, failRunOn, }) {
     if (failRunOn === "never") {
@@ -30240,8 +30186,8 @@ exports.generatePreviewComment = generatePreviewComment;
 exports.generateMergeComment = generateMergeComment;
 exports.upsertComment = upsertComment;
 const github = __importStar(__nccwpck_require__(3228));
-function generatePreviewComment({ outcomes, parentOutcomes, orgName, projectName, }) {
-    const generateRow = (lang, outcome, parentOutcome) => {
+function generatePreviewComment({ outcomes, baseOutcomes, orgName, projectName, }) {
+    const generateRow = (lang, outcome, baseOutcome) => {
         const studioUrl = `https://app.stainless.com/${orgName}/${projectName}/studio?language=${lang}&branch=preview/${github.context.payload.pull_request.head.ref}`;
         let githubUrl;
         let compareUrl;
@@ -30249,17 +30195,17 @@ function generatePreviewComment({ outcomes, parentOutcomes, orgName, projectName
         if (outcome.commit) {
             const { owner, name, branch } = outcome.commit.repo;
             githubUrl = `https://github.com/${owner}/${name}/tree/${branch}`;
-            if (parentOutcome?.commit) {
-                const base = parentOutcome.commit.sha;
+            if (baseOutcome?.commit) {
+                const base = baseOutcome.commit.repo.branch;
                 const head = branch;
                 compareUrl = `https://github.com/${owner}/${name}/compare/${base}..${head}`;
             }
             else {
-                if (parentOutcome) {
-                    notes = `Could not generate a diff link because the build's parent had conclusion: ${parentOutcome?.conclusion}`;
+                if (baseOutcome) {
+                    notes = `Could not generate a diff link because the base build had conclusion: ${baseOutcome?.conclusion}`;
                 }
                 else {
-                    notes = `Could not generate a diff link because a parent build was not found`;
+                    notes = `Could not generate a diff link because a base build was not found`;
                 }
             }
         }
@@ -30288,7 +30234,7 @@ function generatePreviewComment({ outcomes, parentOutcomes, orgName, projectName
 |----------|------------|--------|--------|------|-------|`;
     const tableRows = Object.keys(outcomes)
         .map((lang) => {
-        return generateRow(lang, outcomes[lang], parentOutcomes?.[lang]);
+        return generateRow(lang, outcomes[lang], baseOutcomes?.[lang]);
     })
         .join("");
     const npmRepo = (outcomes["typescript"] ?? outcomes["node"])?.commit?.repo;
@@ -32319,65 +32265,33 @@ module.exports = parseParams
 /***/ }),
 
 /***/ 5680:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
-var __classPrivateFieldSet = (this && this.__classPrivateFieldSet) || function (receiver, state, value, kind, f) {
-    if (kind === "m") throw new TypeError("Private method is not writable");
-    if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
-    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
-    return (kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value)), value;
-};
-var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (receiver, state, kind, f) {
-    if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
-    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
-    return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
-};
 var _a, _StainlessV0_encoder;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.StainlessV0 = void 0;
+const tslib_1 = __nccwpck_require__(2793);
 const uuid_1 = __nccwpck_require__(2420);
 const values_1 = __nccwpck_require__(8925);
 const sleep_1 = __nccwpck_require__(7508);
 const log_1 = __nccwpck_require__(9377);
 const errors_1 = __nccwpck_require__(3922);
 const detect_platform_1 = __nccwpck_require__(5556);
-const Shims = __importStar(__nccwpck_require__(3892));
-const Opts = __importStar(__nccwpck_require__(4467));
-const qs = __importStar(__nccwpck_require__(6286));
+const Shims = tslib_1.__importStar(__nccwpck_require__(3892));
+const Opts = tslib_1.__importStar(__nccwpck_require__(4467));
+const qs = tslib_1.__importStar(__nccwpck_require__(6286));
 const version_1 = __nccwpck_require__(2759);
-const Errors = __importStar(__nccwpck_require__(37));
-const Uploads = __importStar(__nccwpck_require__(1205));
-const API = __importStar(__nccwpck_require__(4489));
+const Errors = tslib_1.__importStar(__nccwpck_require__(37));
+const Uploads = tslib_1.__importStar(__nccwpck_require__(1205));
+const API = tslib_1.__importStar(__nccwpck_require__(4489));
 const api_promise_1 = __nccwpck_require__(4383);
 const headers_1 = __nccwpck_require__(5571);
 const build_target_outputs_1 = __nccwpck_require__(864);
 const builds_1 = __nccwpck_require__(4656);
+const orgs_1 = __nccwpck_require__(5378);
 const env_1 = __nccwpck_require__(6728);
 const log_2 = __nccwpck_require__(9377);
 const values_2 = __nccwpck_require__(8925);
@@ -32403,13 +32317,14 @@ class StainlessV0 {
         this.projects = new API.Projects(this);
         this.builds = new API.Builds(this);
         this.buildTargetOutputs = new API.BuildTargetOutputs(this);
+        this.orgs = new API.Orgs(this);
         const options = {
             apiKey,
             ...opts,
             baseURL: baseURL || `https://api.stainless.com`,
         };
         this.baseURL = options.baseURL;
-        this.timeout = options.timeout ?? StainlessV0.DEFAULT_TIMEOUT /* 1 minute */;
+        this.timeout = options.timeout ?? _a.DEFAULT_TIMEOUT /* 1 minute */;
         this.logger = options.logger ?? console;
         const defaultLogLevel = 'warn';
         // Set default logLevel early so that we can log a warning in parseLogLevel.
@@ -32421,9 +32336,25 @@ class StainlessV0 {
         this.fetchOptions = options.fetchOptions;
         this.maxRetries = options.maxRetries ?? 2;
         this.fetch = options.fetch ?? Shims.getDefaultFetch();
-        __classPrivateFieldSet(this, _StainlessV0_encoder, Opts.FallbackEncoder, "f");
+        tslib_1.__classPrivateFieldSet(this, _StainlessV0_encoder, Opts.FallbackEncoder, "f");
         this._options = options;
         this.apiKey = apiKey;
+    }
+    /**
+     * Create a new client instance re-using the same options given to the current client with optional overriding.
+     */
+    withOptions(options) {
+        return new this.constructor({
+            ...this._options,
+            baseURL: this.baseURL,
+            maxRetries: this.maxRetries,
+            timeout: this.timeout,
+            logger: this.logger,
+            logLevel: this.logLevel,
+            fetchOptions: this.fetchOptions,
+            apiKey: this.apiKey,
+            ...options,
+        });
     }
     defaultQuery() {
         return this._options.defaultQuery;
@@ -32622,11 +32553,13 @@ class StainlessV0 {
             // See https://github.com/nodejs/undici/issues/2294
             fetchOptions.method = method.toUpperCase();
         }
-        return (
-        // use undefined this binding; fetch errors if bound to something else in browser/cloudflare
-        this.fetch.call(undefined, url, fetchOptions).finally(() => {
+        try {
+            // use undefined this binding; fetch errors if bound to something else in browser/cloudflare
+            return await this.fetch.call(undefined, url, fetchOptions);
+        }
+        finally {
             clearTimeout(timeout);
-        }));
+        }
     }
     shouldRetry(response) {
         // Note this is not a standard header.
@@ -32764,7 +32697,7 @@ class StainlessV0 {
             return { bodyHeaders: undefined, body: Shims.ReadableStreamFrom(body) };
         }
         else {
-            return __classPrivateFieldGet(this, _StainlessV0_encoder, "f").call(this, { body, headers });
+            return tslib_1.__classPrivateFieldGet(this, _StainlessV0_encoder, "f").call(this, { body, headers });
         }
     }
 }
@@ -32789,30 +32722,21 @@ StainlessV0.toFile = Uploads.toFile;
 StainlessV0.Projects = projects_1.Projects;
 StainlessV0.Builds = builds_1.Builds;
 StainlessV0.BuildTargetOutputs = build_target_outputs_1.BuildTargetOutputs;
+StainlessV0.Orgs = orgs_1.Orgs;
 //# sourceMappingURL=client.js.map
 
 /***/ }),
 
 /***/ 4383:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
-var __classPrivateFieldSet = (this && this.__classPrivateFieldSet) || function (receiver, state, value, kind, f) {
-    if (kind === "m") throw new TypeError("Private method is not writable");
-    if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
-    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
-    return (kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value)), value;
-};
-var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (receiver, state, kind, f) {
-    if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
-    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
-    return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
-};
 var _APIPromise_client;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.APIPromise = void 0;
+const tslib_1 = __nccwpck_require__(2793);
 const parse_1 = __nccwpck_require__(6306);
 /**
  * A subclass of `Promise` providing additional helper methods
@@ -32829,10 +32753,10 @@ class APIPromise extends Promise {
         this.responsePromise = responsePromise;
         this.parseResponse = parseResponse;
         _APIPromise_client.set(this, void 0);
-        __classPrivateFieldSet(this, _APIPromise_client, client, "f");
+        tslib_1.__classPrivateFieldSet(this, _APIPromise_client, client, "f");
     }
     _thenUnwrap(transform) {
-        return new APIPromise(__classPrivateFieldGet(this, _APIPromise_client, "f"), this.responsePromise, async (client, props) => transform(await this.parseResponse(client, props), props));
+        return new APIPromise(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), this.responsePromise, async (client, props) => transform(await this.parseResponse(client, props), props));
     }
     /**
      * Gets the raw `Response` instance instead of parsing the response
@@ -32864,7 +32788,7 @@ class APIPromise extends Promise {
     }
     parse() {
         if (!this.parsedPromise) {
-            this.parsedPromise = this.responsePromise.then((data) => this.parseResponse(__classPrivateFieldGet(this, _APIPromise_client, "f"), data));
+            this.parsedPromise = this.responsePromise.then((data) => this.parseResponse(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), data));
         }
         return this.parsedPromise;
     }
@@ -33248,7 +33172,8 @@ exports.getPlatformHeaders = getPlatformHeaders;
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.castToError = exports.isAbortError = void 0;
+exports.castToError = void 0;
+exports.isAbortError = isAbortError;
 function isAbortError(err) {
     return (typeof err === 'object' &&
         err !== null &&
@@ -33257,7 +33182,6 @@ function isAbortError(err) {
             // Expo fetch
             ('message' in err && String(err.message).includes('FetchRequestCanceledException'))));
 }
-exports.isAbortError = isAbortError;
 const castToError = (err) => {
     if (err instanceof Error)
         return err;
@@ -33324,6 +33248,8 @@ function* iterateHeaders(headers) {
     }
     for (let row of iter) {
         const name = row[0];
+        if (typeof name !== 'string')
+            throw new TypeError('expected header name to be a string');
         const values = isArray(row[1]) ? row[1] : [row[1]];
         let didClear = false;
         for (const value of values) {
@@ -33342,8 +33268,8 @@ function* iterateHeaders(headers) {
 const buildHeaders = (newHeaders) => {
     const targetHeaders = new Headers();
     const nullHeaders = new Set();
-    const seenHeaders = new Set();
     for (const headers of newHeaders) {
+        const seenHeaders = new Set();
         for (const [name, value] of iterateHeaders(headers)) {
             const lowerName = name.toLowerCase();
             if (!seenHeaders.has(lowerName)) {
@@ -33380,7 +33306,7 @@ exports.isEmptyHeaders = isEmptyHeaders;
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.defaultParseResponse = void 0;
+exports.defaultParseResponse = defaultParseResponse;
 const log_1 = __nccwpck_require__(9377);
 async function defaultParseResponse(client, props) {
     const { response, requestLogID, retryOfRequestLogID, startTime } = props;
@@ -33411,7 +33337,6 @@ async function defaultParseResponse(client, props) {
     }));
     return body;
 }
-exports.defaultParseResponse = defaultParseResponse;
 //# sourceMappingURL=parse.js.map
 
 /***/ }),
@@ -33461,7 +33386,7 @@ Object.defineProperty(exports, "stringify", ({ enumerable: true, get: function (
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.stringify = void 0;
+exports.stringify = stringify;
 const utils_1 = __nccwpck_require__(6207);
 const formats_1 = __nccwpck_require__(7834);
 const has = Object.prototype.hasOwnProperty;
@@ -33737,7 +33662,6 @@ function stringify(object, opts = {}) {
     }
     return joined.length > 0 ? prefix + joined : '';
 }
-exports.stringify = stringify;
 //# sourceMappingURL=stringify.js.map
 
 /***/ }),
@@ -33748,7 +33672,15 @@ exports.stringify = stringify;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.maybe_map = exports.combine = exports.is_buffer = exports.is_regexp = exports.compact = exports.encode = exports.decode = exports.assign_single_source = exports.merge = void 0;
+exports.encode = void 0;
+exports.merge = merge;
+exports.assign_single_source = assign_single_source;
+exports.decode = decode;
+exports.compact = compact;
+exports.is_regexp = is_regexp;
+exports.is_buffer = is_buffer;
+exports.combine = combine;
+exports.maybe_map = maybe_map;
 const formats_1 = __nccwpck_require__(7834);
 const has = Object.prototype.hasOwnProperty;
 const is_array = Array.isArray;
@@ -33841,14 +33773,12 @@ function merge(target, source, options = {}) {
         return acc;
     }, mergeTarget);
 }
-exports.merge = merge;
 function assign_single_source(target, source) {
     return Object.keys(source).reduce(function (acc, key) {
         acc[key] = source[key];
         return acc;
     }, target);
 }
-exports.assign_single_source = assign_single_source;
 function decode(str, _, charset) {
     const strWithoutPlus = str.replace(/\+/g, ' ');
     if (charset === 'iso-8859-1') {
@@ -33863,7 +33793,6 @@ function decode(str, _, charset) {
         return strWithoutPlus;
     }
 }
-exports.decode = decode;
 const limit = 1024;
 const encode = (str, _defaultEncoder, charset, _kind, format) => {
     // This code was originally written by Brian White for the io.js core querystring library.
@@ -33947,22 +33876,18 @@ function compact(value) {
     compact_queue(queue);
     return value;
 }
-exports.compact = compact;
 function is_regexp(obj) {
     return Object.prototype.toString.call(obj) === '[object RegExp]';
 }
-exports.is_regexp = is_regexp;
 function is_buffer(obj) {
     if (!obj || typeof obj !== 'object') {
         return false;
     }
     return !!(obj.constructor && obj.constructor.isBuffer && obj.constructor.isBuffer(obj));
 }
-exports.is_buffer = is_buffer;
 function combine(a, b) {
     return [].concat(a, b);
 }
-exports.combine = combine;
 function maybe_map(val, fn) {
     if (is_array(val)) {
         const mapped = [];
@@ -33973,7 +33898,6 @@ function maybe_map(val, fn) {
     }
     return fn(val);
 }
-exports.maybe_map = maybe_map;
 //# sourceMappingURL=utils.js.map
 
 /***/ }),
@@ -34006,14 +33930,17 @@ exports.FallbackEncoder = FallbackEncoder;
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.CancelReadableStream = exports.ReadableStreamToAsyncIterable = exports.ReadableStreamFrom = exports.makeReadableStream = exports.getDefaultFetch = void 0;
+exports.getDefaultFetch = getDefaultFetch;
+exports.makeReadableStream = makeReadableStream;
+exports.ReadableStreamFrom = ReadableStreamFrom;
+exports.ReadableStreamToAsyncIterable = ReadableStreamToAsyncIterable;
+exports.CancelReadableStream = CancelReadableStream;
 function getDefaultFetch() {
     if (typeof fetch !== 'undefined') {
         return fetch;
     }
     throw new Error('`fetch` is not defined as a global; Either pass `fetch` to the client, `new StainlessV0({ fetch })` or polyfill the global, `globalThis.fetch = fetch`');
 }
-exports.getDefaultFetch = getDefaultFetch;
 function makeReadableStream(...args) {
     const ReadableStream = globalThis.ReadableStream;
     if (typeof ReadableStream === 'undefined') {
@@ -34023,7 +33950,6 @@ function makeReadableStream(...args) {
     }
     return new ReadableStream(...args);
 }
-exports.makeReadableStream = makeReadableStream;
 function ReadableStreamFrom(iterable) {
     let iter = Symbol.asyncIterator in iterable ? iterable[Symbol.asyncIterator]() : iterable[Symbol.iterator]();
     return makeReadableStream({
@@ -34042,7 +33968,6 @@ function ReadableStreamFrom(iterable) {
         },
     });
 }
-exports.ReadableStreamFrom = ReadableStreamFrom;
 /**
  * Most browsers don't yet have async iterable support for ReadableStream,
  * and Node has a very different way of reading bytes from its "ReadableStream".
@@ -34077,7 +34002,6 @@ function ReadableStreamToAsyncIterable(stream) {
         },
     };
 }
-exports.ReadableStreamToAsyncIterable = ReadableStreamToAsyncIterable;
 /**
  * Cancels a ReadableStream we don't need to consume.
  * See https://undici.nodejs.org/#/?id=garbage-collection
@@ -34094,129 +34018,7 @@ async function CancelReadableStream(stream) {
     reader.releaseLock();
     await cancelPromise;
 }
-exports.CancelReadableStream = CancelReadableStream;
 //# sourceMappingURL=shims.js.map
-
-/***/ }),
-
-/***/ 6191:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getCrypto = void 0;
-const getBuiltinModule_1 = __nccwpck_require__(8573);
-let getCrypto = function lazyGetCrypto() {
-    if (exports.getCrypto !== lazyGetCrypto)
-        return (0, exports.getCrypto)();
-    const crypto = globalThis.crypto || (0, getBuiltinModule_1.getBuiltinModule)?.('node:crypto')?.webcrypto;
-    exports.getCrypto = () => crypto;
-    return crypto;
-};
-exports.getCrypto = getCrypto;
-//# sourceMappingURL=crypto.js.map
-
-/***/ }),
-
-/***/ 4112:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getFile = void 0;
-const getBuiltinModule_1 = __nccwpck_require__(8573);
-let getFile = function lazyGetFile() {
-    if (exports.getFile !== lazyGetFile)
-        return (0, exports.getFile)();
-    // We can drop getBuiltinModule once we no longer support Node < 20.0.0
-    const File = globalThis.File ?? (0, getBuiltinModule_1.getBuiltinModule)?.('node:buffer')?.File;
-    if (!File)
-        throw new Error('`File` is not defined as a global, which is required for file uploads.');
-    exports.getFile = () => File;
-    return File;
-};
-exports.getFile = getFile;
-//# sourceMappingURL=file.js.map
-
-/***/ }),
-
-/***/ 8573:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getBuiltinModule = void 0;
-/**
- * Load a Node built-in module. ID may or may not be prefixed by `node:` and
- * will be normalized. If we used static imports then our bundle size would be bloated by
- * injected polyfills, and if we used dynamic require then in addition to bundlers logging warnings,
- * our code would not work when bundled to ESM and run in Node 18.
- * @param {string} id ID of the built-in to be loaded.
- * @returns {object|undefined} exports of the built-in. Undefined if the built-in
- * does not exist.
- */
-let getBuiltinModule = function getBuiltinModuleLazy(id) {
-    try {
-        if (exports.getBuiltinModule !== getBuiltinModuleLazy)
-            return exports.getBuiltinModule(id);
-        if (process.getBuiltinModule) {
-            exports.getBuiltinModule = process.getBuiltinModule;
-        }
-        else {
-            /* Fallback implementation for Node 18 */
-            function createFallbackGetBuiltinModule(BuiltinModule) {
-                return function getBuiltinModule(id) {
-                    id = BuiltinModule.normalizeRequirableId(String(id));
-                    if (!BuiltinModule.canBeRequiredByUsers(id)) {
-                        return;
-                    }
-                    const mod = BuiltinModule.map.get(id);
-                    mod.compileForPublicLoader();
-                    return mod.exports;
-                };
-            }
-            const magicKey = Math.random() + '';
-            let module;
-            let ObjectPrototype = Blob;
-            for (let next; (next = Reflect.getPrototypeOf(ObjectPrototype)); ObjectPrototype = next)
-                ;
-            try {
-                const kClone = Object.getOwnPropertySymbols(Blob.prototype).find((e) => e.description?.includes('clone'));
-                Object.defineProperty(ObjectPrototype, magicKey, {
-                    get() {
-                        module = this;
-                        throw null;
-                    },
-                    configurable: true,
-                });
-                structuredClone(new (class extends Blob {
-                    [kClone]() {
-                        return {
-                            deserializeInfo: 'internal/bootstrap/realm:' + magicKey,
-                        };
-                    }
-                })([]));
-            }
-            catch { }
-            delete ObjectPrototype[magicKey];
-            if (module) {
-                exports.getBuiltinModule = createFallbackGetBuiltinModule(module.BuiltinModule);
-            }
-            else {
-                exports.getBuiltinModule = () => undefined;
-            }
-        }
-        return exports.getBuiltinModule(id);
-    }
-    catch {
-        return undefined;
-    }
-};
-exports.getBuiltinModule = getBuiltinModule;
-//# sourceMappingURL=getBuiltinModule.js.map
 
 /***/ }),
 
@@ -34226,9 +34028,9 @@ exports.getBuiltinModule = getBuiltinModule;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.toFile = void 0;
-const file_1 = __nccwpck_require__(4112);
+exports.toFile = toFile;
 const uploads_1 = __nccwpck_require__(9919);
+const uploads_2 = __nccwpck_require__(9919);
 /**
  * This check adds the arrayBuffer() method type because it is available and used at runtime
  */
@@ -34261,11 +34063,12 @@ const isResponseLike = (value) => value != null &&
  * @returns a {@link File} with the given properties
  */
 async function toFile(value, name, options) {
+    (0, uploads_2.checkFileSupport)();
     // If it's a promise, resolve it.
     value = await value;
     // If we've been given a `File` we don't need to do anything
     if (isFileLike(value)) {
-        if (value instanceof (0, file_1.getFile)()) {
+        if (value instanceof File) {
             return value;
         }
         return (0, uploads_1.makeFile)([await value.arrayBuffer()], value.name);
@@ -34285,7 +34088,6 @@ async function toFile(value, name, options) {
     }
     return (0, uploads_1.makeFile)(parts, name, options);
 }
-exports.toFile = toFile;
 async function getBytes(value) {
     let parts = [];
     if (typeof value === 'string' ||
@@ -34318,24 +34120,124 @@ function propsForError(value) {
 
 /***/ }),
 
+/***/ 2793:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.__setModuleDefault = exports.__createBinding = void 0;
+exports.__importStar = __importStar;
+exports.__classPrivateFieldSet = __classPrivateFieldSet;
+exports.__classPrivateFieldGet = __classPrivateFieldGet;
+exports.__exportStar = __exportStar;
+var __createBinding = Object.create
+    ? function (o, m, k, k2) {
+        if (k2 === void 0)
+            k2 = k;
+        var desc = Object.getOwnPropertyDescriptor(m, k);
+        if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+            desc = {
+                enumerable: true,
+                get: function () {
+                    return m[k];
+                },
+            };
+        }
+        Object.defineProperty(o, k2, desc);
+    }
+    : function (o, m, k, k2) {
+        if (k2 === void 0)
+            k2 = k;
+        o[k2] = m[k];
+    };
+exports.__createBinding = __createBinding;
+var __setModuleDefault = Object.create
+    ? function (o, v) {
+        Object.defineProperty(o, "default", { enumerable: true, value: v });
+    }
+    : function (o, v) {
+        o["default"] = v;
+    };
+exports.__setModuleDefault = __setModuleDefault;
+var ownKeys = function (o) {
+    ownKeys =
+        Object.getOwnPropertyNames ||
+            function (o2) {
+                var ar = [];
+                for (var k in o2)
+                    if (Object.prototype.hasOwnProperty.call(o2, k))
+                        ar[ar.length] = k;
+                return ar;
+            };
+    return ownKeys(o);
+};
+function __importStar(mod) {
+    if (mod && mod.__esModule)
+        return mod;
+    var result = {};
+    if (mod != null) {
+        for (var k = ownKeys(mod), i = 0; i < k.length; i++)
+            if (k[i] !== "default")
+                __createBinding(result, mod, k[i]);
+    }
+    __setModuleDefault(result, mod);
+    return result;
+}
+function __classPrivateFieldSet(receiver, state, value, kind, f) {
+    if (kind === "m")
+        throw new TypeError("Private method is not writable");
+    if (kind === "a" && !f)
+        throw new TypeError("Private accessor was defined without a setter");
+    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver))
+        throw new TypeError("Cannot write private member to an object whose class did not declare it");
+    return kind === "a" ? f.call(receiver, value) : f ? (f.value = value) : state.set(receiver, value), value;
+}
+function __classPrivateFieldGet(receiver, state, kind, f) {
+    if (kind === "a" && !f)
+        throw new TypeError("Private accessor was defined without a getter");
+    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver))
+        throw new TypeError("Cannot read private member from an object whose class did not declare it");
+    return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
+}
+function __exportStar(m, o) {
+    for (var p in m)
+        if (p !== "default" && !Object.prototype.hasOwnProperty.call(o, p))
+            __createBinding(o, m, p);
+}
+
+
+/***/ }),
+
 /***/ 9919:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.createForm = exports.multipartFormRequestOptions = exports.maybeMultipartFormRequestOptions = exports.isAsyncIterable = exports.getName = exports.makeFile = void 0;
-const file_1 = __nccwpck_require__(4112);
+exports.createForm = exports.multipartFormRequestOptions = exports.maybeMultipartFormRequestOptions = exports.isAsyncIterable = exports.checkFileSupport = void 0;
+exports.makeFile = makeFile;
+exports.getName = getName;
 const shims_1 = __nccwpck_require__(3892);
+const checkFileSupport = () => {
+    if (typeof File === 'undefined') {
+        const { process } = globalThis;
+        const isOldNode = typeof process?.versions?.node === 'string' && parseInt(process.versions.node.split('.')) < 20;
+        throw new Error('`File` is not defined as a global, which is required for file uploads.' +
+            (isOldNode ?
+                " Update to Node 20 LTS or newer, or set `globalThis.File` to `import('node:buffer').File`."
+                : ''));
+    }
+};
+exports.checkFileSupport = checkFileSupport;
 /**
  * Construct a `File` instance. This is used to ensure a helpful error is thrown
  * for environments that don't define a global `File` yet.
  */
 function makeFile(fileBits, fileName, options) {
-    const File = (0, file_1.getFile)();
+    (0, exports.checkFileSupport)();
     return new File(fileBits, fileName ?? 'unknown_file', options);
 }
-exports.makeFile = makeFile;
 function getName(value) {
     return (((typeof value === 'object' &&
         value !== null &&
@@ -34347,7 +34249,6 @@ function getName(value) {
         .split(/[\\/]/)
         .pop() || undefined);
 }
-exports.getName = getName;
 const isAsyncIterable = (value) => value != null && typeof value === 'object' && typeof value[Symbol.asyncIterator] === 'function';
 exports.isAsyncIterable = isAsyncIterable;
 /**
@@ -34406,7 +34307,7 @@ const createForm = async (body, fetch) => {
 exports.createForm = createForm;
 // We check for Blob not File because Bun.File doesn't inherit from File,
 // but they both inherit from Blob and have a `name` property at runtime.
-const isNamedBlob = (value) => value instanceof (0, file_1.getFile)() || (value instanceof Blob && 'name' in value);
+const isNamedBlob = (value) => value instanceof Blob && 'name' in value;
 const isUploadable = (value) => typeof value === 'object' &&
     value !== null &&
     (value instanceof Response || (0, exports.isAsyncIterable)(value) || isNamedBlob(value));
@@ -34492,7 +34393,8 @@ exports.readEnv = readEnv;
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.formatRequestDetails = exports.loggerFor = exports.parseLogLevel = void 0;
+exports.formatRequestDetails = exports.parseLogLevel = void 0;
+exports.loggerFor = loggerFor;
 const values_1 = __nccwpck_require__(8925);
 const levelNumbers = {
     off: 0,
@@ -34548,7 +34450,6 @@ function loggerFor(client) {
     cachedLoggers.set(logger, [logLevel, levelLogger]);
     return levelLogger;
 }
-exports.loggerFor = loggerFor;
 const formatRequestDetails = (details) => {
     if (details.options) {
         details.options = { ...details.options };
@@ -34583,7 +34484,8 @@ exports.formatRequestDetails = formatRequestDetails;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.path = exports.createPathTagFunction = exports.encodeURIPath = void 0;
+exports.path = exports.createPathTagFunction = void 0;
+exports.encodeURIPath = encodeURIPath;
 const error_1 = __nccwpck_require__(37);
 /**
  * Percent-encode everything that isn't safe to have in a path without encoding safe chars.
@@ -34596,7 +34498,6 @@ const error_1 = __nccwpck_require__(37);
 function encodeURIPath(str) {
     return str.replace(/[^A-Za-z0-9\-._~!$&'()*+,;=:@]+/g, encodeURIComponent);
 }
-exports.encodeURIPath = encodeURIPath;
 const createPathTagFunction = (pathEncoder = encodeURIPath) => function path(statics, ...params) {
     // If there are no params, no processing is needed.
     if (statics.length === 1)
@@ -34657,19 +34558,18 @@ exports.sleep = sleep;
 /***/ }),
 
 /***/ 2420:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+/***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.uuid4 = void 0;
-const crypto_1 = __nccwpck_require__(6191);
 /**
  * https://stackoverflow.com/a/2117523
  */
 let uuid4 = function () {
-    const crypto = (0, crypto_1.getCrypto)();
+    const { crypto } = globalThis;
     if (crypto?.randomUUID) {
         exports.uuid4 = crypto.randomUUID.bind(crypto);
         return crypto.randomUUID();
@@ -34690,7 +34590,11 @@ exports.uuid4 = uuid4;
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.safeJSON = exports.maybeCoerceBoolean = exports.maybeCoerceFloat = exports.maybeCoerceInteger = exports.coerceBoolean = exports.coerceFloat = exports.coerceInteger = exports.validatePositiveInteger = exports.ensurePresent = exports.isObj = exports.hasOwn = exports.isEmptyObj = exports.maybeObj = exports.isAbsoluteURL = void 0;
+exports.safeJSON = exports.maybeCoerceBoolean = exports.maybeCoerceFloat = exports.maybeCoerceInteger = exports.coerceBoolean = exports.coerceFloat = exports.coerceInteger = exports.validatePositiveInteger = exports.ensurePresent = exports.isAbsoluteURL = void 0;
+exports.maybeObj = maybeObj;
+exports.isEmptyObj = isEmptyObj;
+exports.hasOwn = hasOwn;
+exports.isObj = isObj;
 const error_1 = __nccwpck_require__(37);
 // https://url.spec.whatwg.org/#url-scheme-string
 const startsWithSchemeRegexp = /^[a-z][a-z0-9+.-]*:/i;
@@ -34705,7 +34609,6 @@ function maybeObj(x) {
     }
     return x ?? {};
 }
-exports.maybeObj = maybeObj;
 // https://stackoverflow.com/a/34491287
 function isEmptyObj(obj) {
     if (!obj)
@@ -34714,16 +34617,13 @@ function isEmptyObj(obj) {
         return false;
     return true;
 }
-exports.isEmptyObj = isEmptyObj;
 // https://eslint.org/docs/latest/rules/no-prototype-builtins
 function hasOwn(obj, key) {
     return Object.prototype.hasOwnProperty.call(obj, key);
 }
-exports.hasOwn = hasOwn;
 function isObj(obj) {
     return obj != null && typeof obj === 'object' && !Array.isArray(obj);
 }
-exports.isObj = isObj;
 const ensurePresent = (value) => {
     if (value == null) {
         throw new error_1.StainlessV0Error(`Expected a value to be given but received ${value} instead.`);
@@ -34810,7 +34710,7 @@ exports.BuildTargetOutputs = void 0;
 const resource_1 = __nccwpck_require__(3295);
 class BuildTargetOutputs extends resource_1.APIResource {
     /**
-     * TODO
+     * Download the output of a build target
      */
     retrieve(query, options) {
         return this._client.get('/v0/build_target_outputs', { query, ...options });
@@ -34833,22 +34733,28 @@ const resource_1 = __nccwpck_require__(3295);
 const path_1 = __nccwpck_require__(6224);
 class Builds extends resource_1.APIResource {
     /**
-     * TODO
+     * Create a new build
      */
     create(body, options) {
         return this._client.post('/v0/builds', { body, ...options });
     }
     /**
-     * TODO
+     * Retrieve a build by ID
      */
     retrieve(buildID, options) {
         return this._client.get((0, path_1.path) `/v0/builds/${buildID}`, options);
     }
     /**
-     * TODO
+     * List builds for a project
      */
     list(query, options) {
         return this._client.get('/v0/builds', { query, ...options });
+    }
+    /**
+     * Creates two builds whose outputs can be compared directly
+     */
+    compare(body, options) {
+        return this._client.post('/v0/builds/compare', { body, ...options });
     }
 }
 exports.Builds = Builds;
@@ -34863,14 +34769,45 @@ exports.Builds = Builds;
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Projects = exports.Builds = exports.BuildTargetOutputs = void 0;
+exports.Projects = exports.Orgs = exports.Builds = exports.BuildTargetOutputs = void 0;
 var build_target_outputs_1 = __nccwpck_require__(864);
 Object.defineProperty(exports, "BuildTargetOutputs", ({ enumerable: true, get: function () { return build_target_outputs_1.BuildTargetOutputs; } }));
 var builds_1 = __nccwpck_require__(4656);
 Object.defineProperty(exports, "Builds", ({ enumerable: true, get: function () { return builds_1.Builds; } }));
+var orgs_1 = __nccwpck_require__(5378);
+Object.defineProperty(exports, "Orgs", ({ enumerable: true, get: function () { return orgs_1.Orgs; } }));
 var projects_1 = __nccwpck_require__(3636);
 Object.defineProperty(exports, "Projects", ({ enumerable: true, get: function () { return projects_1.Projects; } }));
 //# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 5378:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Orgs = void 0;
+const resource_1 = __nccwpck_require__(3295);
+const path_1 = __nccwpck_require__(6224);
+class Orgs extends resource_1.APIResource {
+    /**
+     * Retrieve an organization by name
+     */
+    retrieve(orgName, options) {
+        return this._client.get((0, path_1.path) `/v0/orgs/${orgName}`, options);
+    }
+    /**
+     * List organizations the user has access to
+     */
+    list(options) {
+        return this._client.get('/v0/orgs', options);
+    }
+}
+exports.Orgs = Orgs;
+//# sourceMappingURL=orgs.js.map
 
 /***/ }),
 
@@ -34886,13 +34823,13 @@ const resource_1 = __nccwpck_require__(3295);
 const path_1 = __nccwpck_require__(6224);
 class Branches extends resource_1.APIResource {
     /**
-     * TODO
+     * Create a new branch for a project
      */
     create(project, body, options) {
         return this._client.post((0, path_1.path) `/v0/projects/${project}/branches`, { body, ...options });
     }
     /**
-     * TODO
+     * Retrieve a project branch
      */
     retrieve(branch, params, options) {
         const { project } = params;
@@ -34916,13 +34853,13 @@ const resource_1 = __nccwpck_require__(3295);
 const path_1 = __nccwpck_require__(6224);
 class Configs extends resource_1.APIResource {
     /**
-     * TODO
+     * Retrieve configuration files for a project
      */
     retrieve(project, query = {}, options) {
         return this._client.get((0, path_1.path) `/v0/projects/${project}/configs`, { query, ...options });
     }
     /**
-     * TODO
+     * Generate configuration suggestions based on an OpenAPI spec
      */
     guess(project, body, options) {
         return this._client.post((0, path_1.path) `/v0/projects/${project}/configs/guess`, { body, ...options });
@@ -34934,65 +34871,73 @@ exports.Configs = Configs;
 /***/ }),
 
 /***/ 3636:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Projects = void 0;
+const tslib_1 = __nccwpck_require__(2793);
 const resource_1 = __nccwpck_require__(3295);
-const BranchesAPI = __importStar(__nccwpck_require__(7738));
+const BranchesAPI = tslib_1.__importStar(__nccwpck_require__(7738));
 const branches_1 = __nccwpck_require__(7738);
-const ConfigsAPI = __importStar(__nccwpck_require__(3));
+const ConfigsAPI = tslib_1.__importStar(__nccwpck_require__(3));
 const configs_1 = __nccwpck_require__(3);
+const SnippetsAPI = tslib_1.__importStar(__nccwpck_require__(4068));
+const snippets_1 = __nccwpck_require__(4068);
 const path_1 = __nccwpck_require__(6224);
 class Projects extends resource_1.APIResource {
     constructor() {
         super(...arguments);
         this.branches = new BranchesAPI.Branches(this._client);
         this.configs = new ConfigsAPI.Configs(this._client);
+        this.snippets = new SnippetsAPI.Snippets(this._client);
     }
     /**
-     * TODO
+     * Retrieve a project by name
      */
     retrieve(projectName, options) {
         return this._client.get((0, path_1.path) `/v0/projects/${projectName}`, options);
     }
     /**
-     * TODO
+     * Update a project's properties
      */
     update(projectName, body = {}, options) {
         return this._client.patch((0, path_1.path) `/v0/projects/${projectName}`, { body, ...options });
+    }
+    /**
+     * List projects in an organization
+     */
+    list(query, options) {
+        return this._client.get('/v0/projects', { query, ...options });
     }
 }
 exports.Projects = Projects;
 Projects.Branches = branches_1.Branches;
 Projects.Configs = configs_1.Configs;
+Projects.Snippets = snippets_1.Snippets;
 //# sourceMappingURL=projects.js.map
+
+/***/ }),
+
+/***/ 4068:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Snippets = void 0;
+const resource_1 = __nccwpck_require__(3295);
+const path_1 = __nccwpck_require__(6224);
+class Snippets extends resource_1.APIResource {
+    createRequest(projectName, body, options) {
+        return this._client.post((0, path_1.path) `/v0/projects/${projectName}/snippets/request`, { body, ...options });
+    }
+}
+exports.Snippets = Snippets;
+//# sourceMappingURL=snippets.js.map
 
 /***/ }),
 
@@ -35003,7 +34948,7 @@ Projects.Configs = configs_1.Configs;
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.VERSION = void 0;
-exports.VERSION = '0.1.0-alpha.1'; // x-release-please-version
+exports.VERSION = '0.1.0-alpha.2'; // x-release-please-version
 //# sourceMappingURL=version.js.map
 
 /***/ })

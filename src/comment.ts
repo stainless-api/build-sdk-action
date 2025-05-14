@@ -3,19 +3,19 @@ import { Outcomes } from "./build";
 
 export function generatePreviewComment({
   outcomes,
-  parentOutcomes,
+  baseOutcomes,
   orgName,
   projectName,
 }: {
   outcomes: Outcomes;
-  parentOutcomes?: Outcomes;
+  baseOutcomes?: Outcomes | null;
   orgName: string;
   projectName: string;
 }) {
   const generateRow = (
     lang: string,
     outcome: Outcomes[string],
-    parentOutcome?: Outcomes[string],
+    baseOutcome?: Outcomes[string],
   ) => {
     const studioUrl = `https://app.stainless.com/${orgName}/${projectName}/studio?language=${lang}&branch=preview/${github.context.payload.pull_request!.head.ref}`;
     let githubUrl;
@@ -26,15 +26,15 @@ export function generatePreviewComment({
       const { owner, name, branch } = outcome.commit.repo;
       githubUrl = `https://github.com/${owner}/${name}/tree/${branch}`;
 
-      if (parentOutcome?.commit) {
-        const base = parentOutcome.commit.sha;
+      if (baseOutcome?.commit) {
+        const base = baseOutcome.commit.repo.branch;
         const head = branch;
         compareUrl = `https://github.com/${owner}/${name}/compare/${base}..${head}`;
       } else {
-        if (parentOutcome) {
-          notes = `Could not generate a diff link because the build's parent had conclusion: ${parentOutcome?.conclusion}`;
+        if (baseOutcome) {
+          notes = `Could not generate a diff link because the base build had conclusion: ${baseOutcome?.conclusion}`;
         } else {
-          notes = `Could not generate a diff link because a parent build was not found`;
+          notes = `Could not generate a diff link because a base build was not found`;
         }
       }
     } else if (outcome.merge_conflict_pr) {
@@ -67,7 +67,7 @@ export function generatePreviewComment({
 
   const tableRows = Object.keys(outcomes)
     .map((lang) => {
-      return generateRow(lang, outcomes[lang], parentOutcomes?.[lang]);
+      return generateRow(lang, outcomes[lang], baseOutcomes?.[lang]);
     })
     .join("");
 

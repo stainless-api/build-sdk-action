@@ -25,6 +25,7 @@ async function main() {
     const githubToken = getInput("github_token", { required: false });
     const baseSha = getInput("base_sha", { required: true });
     const baseRef = getInput("base_ref", { required: true });
+    const baseBranch = getInput("base_branch", { required: true });
     const defaultBranch = getInput("default_branch", { required: true });
     const headSha = getInput("head_sha", { required: true });
     const branch = getInput("branch", { required: true });
@@ -56,7 +57,9 @@ async function main() {
       return;
     }
 
-    const parentRevisions = await computeParentRevisions({
+    const baseRevision = await computeBaseRevision({
+      stainless,
+      projectName,
       mergeBaseSha,
       nonMainBaseRef,
       oasPath,
@@ -69,22 +72,20 @@ async function main() {
     // Checkout HEAD for runBuilds to pull the files of:
     await exec.exec("git", ["checkout", headSha], { silent: true });
 
-    const builds = await runBuilds({
+    const { outcomes, baseOutcomes } = await runBuilds({
       stainless,
       oasPath,
       configPath,
       projectName,
-      parentRevisions,
+      baseRevision,
+      baseBranch,
       branch,
       guessConfig: !configPath,
       commitMessage,
     });
 
-    const outcomes = builds.outcomes!;
-    const parentOutcomes = builds.parentOutcomes?.find(Boolean);
-
     setOutput("outcomes", outcomes);
-    setOutput("parent_outcomes", parentOutcomes);
+    setOutput("base_outcomes", baseOutcomes);
 
     endGroup();
 
@@ -93,7 +94,7 @@ async function main() {
 
       const commentBody = generatePreviewComment({
         outcomes,
-        parentOutcomes,
+        baseOutcomes,
         orgName,
         projectName,
       });
@@ -164,21 +165,23 @@ async function getParentCommits({
   return { mergeBaseSha, nonMainBaseRef };
 }
 
-async function computeParentRevisions({
+async function computeBaseRevision({
+  stainless,
+  projectName,
   mergeBaseSha,
   nonMainBaseRef,
   oasPath,
   configPath,
 }: {
+  stainless: Stainless;
+  projectName: string;
   mergeBaseSha?: string;
   nonMainBaseRef?: string;
   oasPath?: string;
   configPath?: string;
 }) {
-  const result: Array<string | Record<string, string>> = [];
-
   if (mergeBaseSha) {
-    let hashes: Record<string, string> = {};
+    let hashes: Record<string, { hash: string }> = {};
 
     await exec.exec("git", ["checkout", mergeBaseSha], { silent: true });
 
@@ -190,7 +193,7 @@ async function computeParentRevisions({
         await exec
           .getExecOutput("md5sum", [path], { silent: true })
           .then(({ stdout }) => {
-            hashes[file!] = stdout.split(" ")[0];
+            hashes[file!] = { hash: stdout.split(" ")[0] };
           })
           .catch(() => {
             console.log(`File ${path} does not exist at merge base.`);
@@ -198,18 +201,49 @@ async function computeParentRevisions({
       }
     }
 
-    result.push(hashes);
+    const configCommit = (
+      await stainless.builds.list({
+        project: projectName,
+        revision: hashes,
+        limit: 1,
+      })
+    ).data[0]?.config_commit;
+
+    if (configCommit) {
+      console.log(`Found base via merge base SHA: ${configCommit}`);
+      return configCommit;
+    }
   }
 
   if (nonMainBaseRef) {
-    result.push(nonMainBaseRef);
+    const configCommit = (
+      await stainless.builds.list({
+        project: projectName,
+        branch: nonMainBaseRef,
+        limit: 1,
+      })
+    ).data[0]?.config_commit;
+
+    if (configCommit) {
+      console.log(`Found base via non-main base ref: ${configCommit}`);
+      return configCommit;
+    }
   }
 
-  result.push("main");
+  const configCommit = (
+    await stainless.builds.list({
+      project: projectName,
+      branch: "main",
+      limit: 1,
+    })
+  ).data[0]?.config_commit;
 
-  console.log("Parent revisions:", result);
+  if (!configCommit) {
+    throw new Error("Could not determine base revision");
+  }
 
-  return result;
+  console.log(`Found base via main branch: ${configCommit}`);
+  return configCommit;
 }
 
 main();

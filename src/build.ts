@@ -16,12 +16,14 @@ const isValidConventionalCommitMessage = (message: string) => {
   return CONVENTIONAL_COMMIT_REGEX.test(message);
 };
 
+const POLLING_INTERVAL_SECONDS = 5;
 const MAX_POLLING_SECONDS = 10 * 60; // 10 minutes
 
 export async function runBuilds({
   stainless,
   projectName,
-  parentRevisions = [],
+  baseRevision,
+  baseBranch,
   mergeBranch,
   branch,
   oasPath,
@@ -31,7 +33,8 @@ export async function runBuilds({
 }: {
   stainless: Stainless;
   projectName: string;
-  parentRevisions?: Array<string | { [filepath: string]: string }>;
+  baseRevision?: string;
+  baseBranch?: string;
   mergeBranch?: string;
   branch?: string;
   oasPath?: string;
@@ -49,6 +52,9 @@ export async function runBuilds({
       "If guess_config is true, must have oas_path and no config_path",
     );
   }
+  if (baseRevision && mergeBranch) {
+    throw new Error("Cannot specify both base_revision and merge_branch");
+  }
   if (commitMessage && !isValidConventionalCommitMessage(commitMessage)) {
     if (branch === "main") {
       throw new Error(
@@ -61,189 +67,114 @@ export async function runBuilds({
     }
   }
 
-  const parentBuilds = await findParentBuilds({
-    stainless,
-    projectName,
-    parentRevisions,
-  });
-  const parentBuild = parentBuilds.find(Boolean);
-
   const oasContent = oasPath ? fs.readFileSync(oasPath, "utf-8") : undefined;
   let configContent = configPath
     ? fs.readFileSync(configPath, "utf-8")
     : undefined;
 
-  if (
-    await shouldResetBranch({
-      stainless,
-      projectName,
-      parentBuild,
+  if (!baseRevision) {
+    const build = await stainless.builds.create({
+      project: projectName,
+      revision: mergeBranch
+        ? `${branch}..${mergeBranch}`
+        : {
+            ...(oasContent && {
+              "openapi.yml": {
+                content: oasContent,
+              },
+            }),
+            ...(configContent && {
+              "openapi.stainless.yml": {
+                content: configContent,
+              },
+            }),
+          },
       branch,
-    })
-  ) {
-    if (!configContent) {
-      if (guessConfig) {
-        console.log("Guessing config before branch reset");
-        configContent = Object.values(
-          await stainless.projects.configs.guess(projectName, {
-            branch,
-            spec: oasContent!,
-          }),
-        )[0]?.content;
-      } else {
-        console.log("Saving config before branch reset");
-        configContent = Object.values(
-          await stainless.projects.configs.retrieve(projectName, {
-            branch,
-          }),
-        )[0]?.content;
-      }
-    }
+      commit_message: commitMessage,
+      allow_empty: true,
+    });
 
-    console.log("Hard resetting branch", branch);
-    await stainless.projects.branches.create(projectName, {
-      branch_from: parentBuild!.config_commit,
+    return {
+      baseOutcomes: null,
+      outcomes: await pollBuild({ stainless, build }),
+    };
+  }
+
+  if (!configContent) {
+    if (guessConfig) {
+      console.log("Guessing config before branch reset");
+      configContent = Object.values(
+        await stainless.projects.configs.guess(projectName, {
+          branch,
+          spec: oasContent!,
+        }),
+      )[0]?.content;
+    } else {
+      console.log("Saving config before branch reset");
+      configContent = Object.values(
+        await stainless.projects.configs.retrieve(projectName, {
+          branch,
+        }),
+      )[0]?.content;
+    }
+  }
+
+  console.log(`Hard resetting ${branch} to ${baseRevision}`);
+  const { config_commit } = await stainless.projects.branches.create(
+    projectName,
+    {
+      branch_from: baseRevision,
       branch: branch!,
       force: true,
-    });
-  }
-
-  // create a new build
-  const build = await stainless.builds.create({
-    project: projectName,
-    revision: mergeBranch
-      ? `${branch}..${mergeBranch}`
-      : {
-          ...(oasContent && {
-            "openapi.yml": {
-              content: oasContent,
-            },
-          }),
-          ...(configContent && {
-            "openapi.stainless.yml": {
-              content: configContent,
-            },
-          }),
-        },
-    branch,
-    commit_message: commitMessage,
-    allow_empty: true,
-  });
-
-  const { outcomes, parentOutcomes } = await pollBuilds({
-    stainless,
-    parentBuilds,
-    build,
-  });
-
-  return { outcomes, parentOutcomes };
-}
-
-async function findParentBuilds({
-  stainless,
-  projectName,
-  parentRevisions,
-}: {
-  stainless: Stainless;
-  projectName: string;
-  parentRevisions: Array<string | { [filepath: string]: string }>;
-}) {
-  const parentBuilds = await Promise.all(
-    parentRevisions.map(async (parentRevision) => {
-      console.log("Searching for build against", parentRevision);
-
-      const parentBuild = (
-        await stainless.builds.list({
-          project: projectName,
-          limit: 1,
-          ...(typeof parentRevision === "string"
-            ? { branch: parentRevision }
-            : {
-                revision: Object.fromEntries(
-                  Object.entries(parentRevision).map(([key, hash]) => [
-                    key,
-                    { hash },
-                  ]),
-                ),
-              }),
-        })
-      ).data[0];
-
-      return parentBuild ?? null;
-    }),
+    },
   );
+  console.log(`Hard reset ${branch}, now at ${config_commit}`);
 
-  const parentBuild = parentBuilds.find(Boolean);
-  console.log("Parent builds found:", parentBuilds.length);
+  const { base, head } = await stainless.builds.compare({
+    project: projectName,
+    base: {
+      revision: baseRevision,
+      branch: baseBranch,
+      commit_message: commitMessage,
+    },
+    head: {
+      revision: {
+        ...(oasContent && {
+          "openapi.yml": {
+            content: oasContent,
+          },
+        }),
+        ...(configContent && {
+          "openapi.stainless.yml": {
+            content: configContent,
+          },
+        }),
+      },
+      branch,
+      commit_message: commitMessage,
+    },
+  });
 
-  if (parentBuild) {
-    console.log("Using parent build:", parentBuild.id);
-  } else {
-    console.log("No parent build found");
-  }
+  const results = await Promise.all([
+    pollBuild({ stainless, build: base }),
+    pollBuild({ stainless, build: head }),
+  ]);
 
-  return parentBuilds;
+  return {
+    baseOutcomes: results[0],
+    outcomes: results[1],
+  };
 }
 
-async function shouldResetBranch({
+async function pollBuild({
   stainless,
-  projectName,
-  parentBuild,
-  branch,
-}: {
-  stainless: Stainless;
-  projectName: string;
-  parentBuild?: Build;
-  branch?: string;
-}) {
-  if (!(parentBuild && branch)) {
-    return false;
-  }
-
-  let previousBuild;
-
-  try {
-    previousBuild = (
-      await stainless.projects.branches.retrieve(branch, {
-        project: projectName,
-      })
-    )?.latest_build;
-  } catch (error) {
-    if (error instanceof Stainless.NotFoundError) {
-      console.log(
-        "Branch not found, creating it against",
-        parentBuild.config_commit,
-      );
-      await stainless.projects.branches.create(projectName, {
-        branch_from: parentBuild.config_commit,
-        branch,
-      });
-    } else {
-      throw error;
-    }
-  }
-
-  if (previousBuild?.id) {
-    console.log("Previous build against branch found:", previousBuild.id);
-    if (previousBuild.id === parentBuild.id) {
-      console.log("Branch already up to date");
-    } else {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-async function pollBuilds({
-  stainless,
-  parentBuilds,
   build,
+  pollingIntervalSeconds = POLLING_INTERVAL_SECONDS,
   maxPollingSeconds = MAX_POLLING_SECONDS,
 }: {
   stainless: Stainless;
-  parentBuilds: Array<Build | null>;
   build: Build;
+  pollingIntervalSeconds?: number;
   maxPollingSeconds?: number;
 }) {
   let buildId = build.id;
@@ -252,14 +183,13 @@ async function pollBuilds({
   >;
   if (buildId) {
     console.log(
-      `Created build with ID ${buildId} for languages: ${languages.join(", ")}`,
+      `[${buildId}] Created build against ${build.config_commit} for languages: ${languages.join(", ")}`,
     );
   } else {
     console.log(`No new build was created; exiting.`);
     return {};
   }
 
-  let parentOutcomes: Array<Outcomes> = [];
   let outcomes: Outcomes = {};
 
   const pollingStart = Date.now();
@@ -268,52 +198,38 @@ async function pollBuilds({
     Date.now() - pollingStart < maxPollingSeconds * 1000
   ) {
     for (const language of languages) {
-      for (const [i, parentBuild] of parentBuilds.entries()) {
-        if (!parentOutcomes[i]) {
-          parentOutcomes[i] = {};
-        }
-
-        if (parentBuild && !(language in parentOutcomes[i])) {
-          const parentBuildOutput = parentBuild.targets[language];
-          if (parentBuildOutput?.commit.status === "completed") {
-            const parentOutcome = parentBuildOutput?.commit;
-            console.log(
-              `Parent build ${i + 1} completed with outcome:`,
-              JSON.stringify(parentOutcome),
-            );
-            parentOutcomes[i][language] = parentOutcome.completed;
-          } else {
-            console.log(
-              `Parent build ${i + 1} has status ${parentBuildOutput?.commit.status} for ${language}`,
-            );
-          }
-        }
-      }
-
       if (!(language in outcomes)) {
         const buildOutput = (await stainless.builds.retrieve(buildId)).targets[
           language
         ];
         if (buildOutput?.commit.status === "completed") {
           const outcome = buildOutput?.commit;
-          console.log("Build completed with outcome:", JSON.stringify(outcome));
+          console.log(
+            `[${buildId}] Build completed for ${language} with outcome:`,
+            JSON.stringify(outcome),
+          );
           outcomes[language] = outcome.completed;
         } else {
           console.log(
-            `Build has status ${buildOutput?.commit.status} for ${language}`,
+            `[${buildId}] Build for ${language} has status ${buildOutput?.commit.status}`,
           );
         }
       }
     }
 
     // wait a bit before polling again
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await new Promise((resolve) =>
+      setTimeout(resolve, pollingIntervalSeconds * 1000),
+    );
   }
 
   const languagesWithoutOutcome = languages.filter(
     (language) => !(language in outcomes),
   );
   for (const language of languagesWithoutOutcome) {
+    console.log(
+      `[${buildId}] Build for ${language} timed out after ${maxPollingSeconds} seconds`,
+    );
     outcomes[language] = {
       conclusion: "timed_out",
       commit: null,
@@ -321,7 +237,7 @@ async function pollBuilds({
     };
   }
 
-  return { outcomes, parentOutcomes };
+  return outcomes;
 }
 
 export function checkResults({
