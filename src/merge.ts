@@ -27,6 +27,7 @@ async function main() {
     const defaultBranch = getInput("default_branch", { required: true });
     const headSha = getInput("head_sha", { required: true });
     const mergeBranch = getInput("merge_branch", { required: true });
+    const outputDir = getInput("output_dir", { required: false }) || undefined;
 
     if (makeComment && !githubToken) {
       throw new Error("github_token is required to make a comment");
@@ -53,7 +54,7 @@ async function main() {
 
     startGroup("Running builds");
 
-    const builds = await runBuilds({
+    const { outcomes, documentedSpecPath } = await runBuilds({
       stainless,
       projectName,
       commitMessage,
@@ -61,11 +62,11 @@ async function main() {
       branch: "main",
       mergeBranch,
       guessConfig: false,
+      outputDir,
     });
 
-    const outcomes = builds.outcomes!;
-
     setOutput("outcomes", outcomes);
+    setOutput("documented_spec_path", documentedSpecPath);
 
     endGroup();
 

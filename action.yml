@@ -31,6 +31,7 @@ inputs:
   branch:
     description: Stainless branch to create the build on.
     required: false
+    default: main
   merge_branch:
     description: Stainless branch that this build is merging in changes from.
     required: false
@@ -44,6 +45,13 @@ inputs:
       Stainless branch to create the base build on. Must be specified if
       `base_revision` is specified.
     required: false
+  output_dir:
+    description: >-
+      Directory to write output files to. Defaults to the runner's temporary
+      directory.
+    required: false
+    default: ${{ runner.temp }}
+
 outputs:
   outcomes:
     description: >-
@@ -81,3 +89,9 @@ outputs:
         ...
       }
       ```
+  documented_spec_path:
+    description: >-
+      Path to an OpenAPI spec with SDK code samples. Present when `output_dir`
+      is specified and `code_samples` is in your Stainless config. See
+      https://app.stainless.com/docs/reference/config#open-api-config for
+      more details.

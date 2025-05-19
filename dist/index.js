@@ -20070,7 +20070,7 @@ var formatRequestDetails = (details) => {
 };
 
 // node_modules/stainless/version.mjs
-var VERSION = "0.1.0-alpha.2";
+var VERSION = "0.1.0-alpha.3";
 
 // node_modules/stainless/internal/detect-platform.mjs
 function getDetectedPlatform() {
@@ -21434,7 +21434,8 @@ async function runBuilds({
   oasPath,
   configPath,
   guessConfig = false,
-  commitMessage
+  commitMessage,
+  outputDir
 }) {
   if (mergeBranch && (oasPath || configPath)) {
     throw new Error(
@@ -21481,9 +21482,17 @@ async function runBuilds({
       commit_message: commitMessage,
       allow_empty: true
     });
+    const { outcomes, documentedSpec } = await pollBuild({ stainless, build });
+    let documentedSpecPath2 = null;
+    if (outputDir && documentedSpec) {
+      documentedSpecPath2 = `${outputDir}/openapi.documented.yml`;
+      fs.mkdirSync(outputDir, { recursive: true });
+      fs.writeFileSync(documentedSpecPath2, documentedSpec);
+    }
     return {
       baseOutcomes: null,
-      outcomes: await pollBuild({ stainless, build })
+      outcomes,
+      documentedSpecPath: documentedSpecPath2
     };
   }
   if (!configContent) {
@@ -21542,9 +21551,16 @@ async function runBuilds({
     pollBuild({ stainless, build: base }),
     pollBuild({ stainless, build: head })
   ]);
+  let documentedSpecPath = null;
+  if (outputDir && results[1].documentedSpec) {
+    documentedSpecPath = `${outputDir}/openapi.documented.yml`;
+    fs.mkdirSync(outputDir, { recursive: true });
+    fs.writeFileSync(documentedSpecPath, results[1].documentedSpec);
+  }
   return {
-    baseOutcomes: results[0],
-    outcomes: results[1]
+    baseOutcomes: results[0].outcomes,
+    outcomes: results[1].outcomes,
+    documentedSpecPath
   };
 }
 async function pollBuild({
@@ -21553,6 +21569,8 @@ async function pollBuild({
   pollingIntervalSeconds = POLLING_INTERVAL_SECONDS,
   maxPollingSeconds = MAX_POLLING_SECONDS
 }) {
+  let outcomes = {};
+  let documentedSpec = null;
   let buildId = build.id;
   let languages = Object.keys(build.targets);
   if (buildId) {
@@ -21561,14 +21579,14 @@ async function pollBuild({
     );
   } else {
     console.log(`No new build was created; exiting.`);
-    return {};
+    return { outcomes, documentedSpec };
   }
-  let outcomes = {};
   const pollingStart = Date.now();
   while (Object.keys(outcomes).length < languages.length && Date.now() - pollingStart < maxPollingSeconds * 1e3) {
+    const build2 = await stainless.builds.retrieve(buildId);
     for (const language of languages) {
       if (!(language in outcomes)) {
-        const buildOutput = (await stainless.builds.retrieve(buildId)).targets[language];
+        const buildOutput = build2.targets[language];
         if (buildOutput?.commit.status === "completed") {
           const outcome = buildOutput?.commit;
           console.log(
@@ -21582,6 +21600,9 @@ async function pollBuild({
           );
         }
       }
+    }
+    if (!documentedSpec && build2.documented_spec?.type === "content") {
+      documentedSpec = build2.documented_spec.content;
     }
     await new Promise(
       (resolve) => setTimeout(resolve, pollingIntervalSeconds * 1e3)
@@ -21600,7 +21621,7 @@ async function pollBuild({
       merge_conflict_pr: null
     };
   }
-  return outcomes;
+  return { outcomes, documentedSpec };
 }
 
 // src/index.ts
@@ -21616,8 +21637,9 @@ async function main() {
     const mergeBranch = (0, import_core.getInput)("merge_branch", { required: false }) || void 0;
     const baseRevision = (0, import_core.getInput)("base_revision", { required: false }) || void 0;
     const baseBranch = (0, import_core.getInput)("base_branch", { required: false }) || void 0;
+    const outputDir = (0, import_core.getInput)("output_dir", { required: false }) || void 0;
     const stainless = new StainlessV0({ apiKey, logLevel: "warn" });
-    const { baseOutcomes, outcomes } = await runBuilds({
+    const { baseOutcomes, outcomes, documentedSpecPath } = await runBuilds({
       stainless,
       projectName,
       baseRevision,
@@ -21627,10 +21649,12 @@ async function main() {
       oasPath,
       configPath,
       guessConfig,
-      commitMessage
+      commitMessage,
+      outputDir
     });
     (0, import_core.setOutput)("outcomes", outcomes);
     (0, import_core.setOutput)("base_outcomes", baseOutcomes);
+    (0, import_core.setOutput)("documented_spec_path", documentedSpecPath);
   } catch (error) {
     console.error("Error interacting with API:", error);
     process.exit(1);

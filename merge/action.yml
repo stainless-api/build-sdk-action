@@ -78,6 +78,12 @@ inputs:
       preview action's `branch` input.
     required: false
     default: ${{ format('preview/{0}', github.event.pull_request.head.ref) }}
+  output_dir:
+    description: >-
+      Directory to write output files to. Defaults to the runner's temporary
+      directory.
+    required: false
+    default: ${{ runner.temp }}
 
 outputs:
   outcomes:
@@ -98,3 +104,9 @@ outputs:
         ...
       }
       ```
+  documented_spec_path:
+    description: >-
+      Path to an OpenAPI spec with SDK code samples. Present when `output_dir`
+      is specified and `code_samples` is in your Stainless config. See
+      https://app.stainless.com/docs/reference/config#open-api-config for
+      more details.
