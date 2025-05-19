@@ -2,7 +2,7 @@ name: Stainless — Merge SDK changes
 description: Build SDKs after merging a pull request
 runs:
   using: node20
-  main: ../dist/merge/index.js
+  main: ../dist/merge.js
 inputs:
   stainless_api_key:
     description: Stainless API key.

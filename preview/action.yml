@@ -2,7 +2,7 @@ name: Stainless — Preview SDK changes
 description: Build SDKs to preview a pull request
 runs:
   using: node20
-  main: ../dist/preview/index.js
+  main: ../dist/preview.js
 inputs:
   stainless_api_key:
     description: Stainless API key.

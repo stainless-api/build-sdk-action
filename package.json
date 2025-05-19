@@ -5,16 +5,16 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "npm run build:index && npm run build:merge && npm run build:preview",
-    "build:index": "ncc build src/index.ts --license licenses.txt",
-    "build:merge": "ncc build src/merge.ts --license licenses.txt --out dist/merge",
-    "build:preview": "ncc build src/preview.ts --license licenses.txt --out dist/preview"
+    "build:index": "esbuild --bundle src/index.ts --outdir=dist --platform=node --target=node20",
+    "build:merge": "esbuild --bundle src/merge.ts --outdir=dist --platform=node --target=node20",
+    "build:preview": "esbuild --bundle src/preview.ts --outdir=dist --platform=node --target=node20"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^22.10.6",
-    "@vercel/ncc": "^0.38.3",
+    "esbuild": "^0.25.4",
     "typescript": "^5.7.3"
   },
   "dependencies": {
