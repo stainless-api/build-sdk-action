@@ -8,6 +8,10 @@ on:
       - reopened
       - closed
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 env:
   # Stainless organization name.
   STAINLESS_ORG: YOUR_ORG
