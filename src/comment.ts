@@ -1,4 +1,5 @@
 import * as github from "@actions/github";
+import GitHub from "@stainless-api/github-internal";
 import { Outcomes } from "./build";
 
 export function generatePreviewComment({
@@ -158,39 +159,24 @@ export async function upsertComment({
   body: string;
   token: string;
 }) {
-  const octokit = github.getOctokit(token);
+  const client = new GitHub({
+    authToken: token,
+    owner: github.context.repo.owner,
+    repo: github.context.repo.repo,
+  });
 
   console.log(
     "Upserting comment on PR:",
     github.context.payload.pull_request!.number,
   );
 
-  const { data: comments } = await octokit.rest.issues.listComments({
-    owner: github.context.repo.owner,
-    repo: github.context.repo.repo,
-    issue_number: github.context.payload.pull_request!.number,
-  });
-
   const firstLine = body.trim().split("\n")[0];
-  const previewComment = comments.find((comment) =>
-    comment.body?.includes(firstLine),
+  await client.repos.issues.comments.upsertBasedOnBodyMatch(
+    github.context.payload.pull_request!.number,
+    {
+      bodyIncludes: firstLine,
+      createParams: { body },
+      updateParams: { body },
+    },
   );
-
-  if (previewComment) {
-    console.log("Updating existing comment:", previewComment.id);
-    await octokit.rest.issues.updateComment({
-      owner: github.context.repo.owner,
-      repo: github.context.repo.repo,
-      comment_id: previewComment.id,
-      body,
-    });
-  } else {
-    console.log("Creating new comment");
-    await octokit.rest.issues.createComment({
-      owner: github.context.repo.owner,
-      repo: github.context.repo.repo,
-      issue_number: github.context.issue.number,
-      body,
-    });
-  }
 }
