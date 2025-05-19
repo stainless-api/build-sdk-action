@@ -19,10 +19,11 @@ async function main() {
       getInput("base_revision", { required: false }) || undefined;
     const baseBranch =
       getInput("base_branch", { required: false }) || undefined;
+    const outputDir = getInput("output_dir", { required: false }) || undefined;
 
     const stainless = new Stainless({ apiKey, logLevel: "warn" });
 
-    const { baseOutcomes, outcomes } = await runBuilds({
+    const { baseOutcomes, outcomes, documentedSpecPath } = await runBuilds({
       stainless,
       projectName,
       baseRevision,
@@ -33,10 +34,12 @@ async function main() {
       configPath,
       guessConfig,
       commitMessage,
+      outputDir,
     });
 
     setOutput("outcomes", outcomes);
     setOutput("base_outcomes", baseOutcomes);
+    setOutput("documented_spec_path", documentedSpecPath);
   } catch (error) {
     console.error("Error interacting with API:", error);
     process.exit(1);

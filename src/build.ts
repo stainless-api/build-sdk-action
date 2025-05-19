@@ -30,6 +30,7 @@ export async function runBuilds({
   configPath,
   guessConfig = false,
   commitMessage,
+  outputDir,
 }: {
   stainless: Stainless;
   projectName: string;
@@ -41,6 +42,7 @@ export async function runBuilds({
   configPath?: string;
   guessConfig?: boolean;
   commitMessage?: string;
+  outputDir?: string;
 }) {
   if (mergeBranch && (oasPath || configPath)) {
     throw new Error(
@@ -94,9 +96,19 @@ export async function runBuilds({
       allow_empty: true,
     });
 
+    const { outcomes, documentedSpec } = await pollBuild({ stainless, build });
+
+    let documentedSpecPath = null;
+    if (outputDir && documentedSpec) {
+      documentedSpecPath = `${outputDir}/openapi.documented.yml`;
+      fs.mkdirSync(outputDir, { recursive: true });
+      fs.writeFileSync(documentedSpecPath, documentedSpec);
+    }
+
     return {
       baseOutcomes: null,
-      outcomes: await pollBuild({ stainless, build }),
+      outcomes,
+      documentedSpecPath,
     };
   }
 
@@ -160,9 +172,17 @@ export async function runBuilds({
     pollBuild({ stainless, build: head }),
   ]);
 
+  let documentedSpecPath = null;
+  if (outputDir && results[1].documentedSpec) {
+    documentedSpecPath = `${outputDir}/openapi.documented.yml`;
+    fs.mkdirSync(outputDir, { recursive: true });
+    fs.writeFileSync(documentedSpecPath, results[1].documentedSpec);
+  }
+
   return {
-    baseOutcomes: results[0],
-    outcomes: results[1],
+    baseOutcomes: results[0].outcomes,
+    outcomes: results[1].outcomes,
+    documentedSpecPath,
   };
 }
 
@@ -177,6 +197,9 @@ async function pollBuild({
   pollingIntervalSeconds?: number;
   maxPollingSeconds?: number;
 }) {
+  let outcomes: Outcomes = {};
+  let documentedSpec: string | null = null;
+
   let buildId = build.id;
   let languages = Object.keys(build.targets) as Array<
     keyof typeof build.targets
@@ -187,21 +210,18 @@ async function pollBuild({
     );
   } else {
     console.log(`No new build was created; exiting.`);
-    return {};
+    return { outcomes, documentedSpec };
   }
-
-  let outcomes: Outcomes = {};
 
   const pollingStart = Date.now();
   while (
     Object.keys(outcomes).length < languages.length &&
     Date.now() - pollingStart < maxPollingSeconds * 1000
   ) {
+    const build = await stainless.builds.retrieve(buildId);
     for (const language of languages) {
       if (!(language in outcomes)) {
-        const buildOutput = (await stainless.builds.retrieve(buildId)).targets[
-          language
-        ];
+        const buildOutput = build.targets[language];
         if (buildOutput?.commit.status === "completed") {
           const outcome = buildOutput?.commit;
           console.log(
@@ -215,6 +235,11 @@ async function pollBuild({
           );
         }
       }
+    }
+
+    // API only returns "content" for now; need to support "url" in the future
+    if (!documentedSpec && build.documented_spec?.type === "content") {
+      documentedSpec = build.documented_spec.content;
     }
 
     // wait a bit before polling again
@@ -237,7 +262,7 @@ async function pollBuild({
     };
   }
 
-  return outcomes;
+  return { outcomes, documentedSpec };
 }
 
 export function checkResults({

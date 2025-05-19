@@ -34,6 +34,13 @@ env:
   # Options: "never" | "note" | "warning" | "error" | "fatal".
   FAIL_ON: error
 
+  # In your repo secrets, configure:
+  # - STAINLESS_API_KEY: a Stainless API key, which you can generate on the
+  #   Stainless organization dashboard
+  # - README_TOKEN: a ReadMe API key
+  # - README_DEFINITION_ID: the ReadMe project API definition ID, viewable when
+  #   editing a ReadMe project API definition
+
 jobs:
   preview:
     if: github.event.action != 'closed'
@@ -77,6 +84,7 @@ jobs:
       # against preview/${{ github.head_ref }} to complete, but assuming that
       # the preview-sdk job happens before the PR merge, it should be fine.
       - name: Run merge build
+        id: build
         uses: stainless-api/build-sdk-action/merge@83889a79caa0a6cf19c35ccc43847c999e27b381
         with:
           stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
@@ -86,3 +94,11 @@ jobs:
           config_path: ${{ env.CONFIG_PATH }}
           commit_message: ${{ env.COMMIT_MESSAGE }}
           fail_on: ${{ env.FAIL_ON }}
+
+      - name: Push spec to ReadMe
+        uses: readmeio/rdme@v10
+        with:
+          rdme: >-
+            openapi ${{ steps.build.outputs.documented_spec_path }} \
+              --key=${{ secrets.README_TOKEN }} \
+              --id=${{ secrets.README_DEFINITION_ID }}
