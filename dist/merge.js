@@ -19411,7 +19411,7 @@ var require_exec = __commonJS({
     exports2.getExecOutput = exports2.exec = void 0;
     var string_decoder_1 = require("string_decoder");
     var tr = __importStar(require_toolrunner());
-    function exec2(commandLine, args, options) {
+    function exec3(commandLine, args, options) {
       return __awaiter(this, void 0, void 0, function* () {
         const commandArgs = tr.argStringToArray(commandLine);
         if (commandArgs.length === 0) {
@@ -19423,7 +19423,7 @@ var require_exec = __commonJS({
         return runner.exec();
       });
     }
-    exports2.exec = exec2;
+    exports2.exec = exec3;
     function getExecOutput2(commandLine, args, options) {
       var _a2, _b;
       return __awaiter(this, void 0, void 0, function* () {
@@ -19446,7 +19446,7 @@ var require_exec = __commonJS({
           }
         };
         const listeners = Object.assign(Object.assign({}, options === null || options === void 0 ? void 0 : options.listeners), { stdout: stdOutListener, stderr: stdErrListener });
-        const exitCode = yield exec2(commandLine, args, Object.assign(Object.assign({}, options), { listeners }));
+        const exitCode = yield exec3(commandLine, args, Object.assign(Object.assign({}, options), { listeners }));
         stdout += stdoutDecoder.end();
         stderr += stderrDecoder.end();
         return {
@@ -19524,12 +19524,12 @@ var require_platform = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.getDetails = exports2.isLinux = exports2.isMacOS = exports2.isWindows = exports2.arch = exports2.platform = void 0;
     var os_1 = __importDefault(require("os"));
-    var exec2 = __importStar(require_exec());
+    var exec3 = __importStar(require_exec());
     var getWindowsInfo = () => __awaiter(void 0, void 0, void 0, function* () {
-      const { stdout: version } = yield exec2.getExecOutput('powershell -command "(Get-CimInstance -ClassName Win32_OperatingSystem).Version"', void 0, {
+      const { stdout: version } = yield exec3.getExecOutput('powershell -command "(Get-CimInstance -ClassName Win32_OperatingSystem).Version"', void 0, {
         silent: true
       });
-      const { stdout: name } = yield exec2.getExecOutput('powershell -command "(Get-CimInstance -ClassName Win32_OperatingSystem).Caption"', void 0, {
+      const { stdout: name } = yield exec3.getExecOutput('powershell -command "(Get-CimInstance -ClassName Win32_OperatingSystem).Caption"', void 0, {
         silent: true
       });
       return {
@@ -19539,7 +19539,7 @@ var require_platform = __commonJS({
     });
     var getMacOsInfo = () => __awaiter(void 0, void 0, void 0, function* () {
       var _a2, _b, _c, _d;
-      const { stdout } = yield exec2.getExecOutput("sw_vers", void 0, {
+      const { stdout } = yield exec3.getExecOutput("sw_vers", void 0, {
         silent: true
       });
       const version = (_b = (_a2 = stdout.match(/ProductVersion:\s*(.+)/)) === null || _a2 === void 0 ? void 0 : _a2[1]) !== null && _b !== void 0 ? _b : "";
@@ -19550,7 +19550,7 @@ var require_platform = __commonJS({
       };
     });
     var getLinuxInfo = () => __awaiter(void 0, void 0, void 0, function* () {
-      const { stdout } = yield exec2.getExecOutput("lsb_release", ["-i", "-r", "-s"], {
+      const { stdout } = yield exec3.getExecOutput("lsb_release", ["-i", "-r", "-s"], {
         silent: true
       });
       const [name, version] = stdout.trim().split("\n");
@@ -25484,6 +25484,12 @@ async function isConfigChanged({
   oasPath,
   configPath
 }) {
+  await exec.exec("git", ["fetch", "--depth=1", "origin", before], {
+    silent: true
+  });
+  await exec.exec("git", ["fetch", "--depth=1", "origin", after], {
+    silent: true
+  });
   const diffOutput = await exec.getExecOutput("git", [
     "diff",
     "--name-only",

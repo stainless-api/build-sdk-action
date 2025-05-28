@@ -19411,7 +19411,7 @@ var require_exec = __commonJS({
     exports2.getExecOutput = exports2.exec = void 0;
     var string_decoder_1 = require("string_decoder");
     var tr = __importStar(require_toolrunner());
-    function exec4(commandLine, args, options) {
+    function exec5(commandLine, args, options) {
       return __awaiter(this, void 0, void 0, function* () {
         const commandArgs = tr.argStringToArray(commandLine);
         if (commandArgs.length === 0) {
@@ -19423,7 +19423,7 @@ var require_exec = __commonJS({
         return runner.exec();
       });
     }
-    exports2.exec = exec4;
+    exports2.exec = exec5;
     function getExecOutput3(commandLine, args, options) {
       var _a2, _b;
       return __awaiter(this, void 0, void 0, function* () {
@@ -19446,7 +19446,7 @@ var require_exec = __commonJS({
           }
         };
         const listeners = Object.assign(Object.assign({}, options === null || options === void 0 ? void 0 : options.listeners), { stdout: stdOutListener, stderr: stdErrListener });
-        const exitCode = yield exec4(commandLine, args, Object.assign(Object.assign({}, options), { listeners }));
+        const exitCode = yield exec5(commandLine, args, Object.assign(Object.assign({}, options), { listeners }));
         stdout += stdoutDecoder.end();
         stderr += stderrDecoder.end();
         return {
@@ -19524,12 +19524,12 @@ var require_platform = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.getDetails = exports2.isLinux = exports2.isMacOS = exports2.isWindows = exports2.arch = exports2.platform = void 0;
     var os_1 = __importDefault(require("os"));
-    var exec4 = __importStar(require_exec());
+    var exec5 = __importStar(require_exec());
     var getWindowsInfo = () => __awaiter(void 0, void 0, void 0, function* () {
-      const { stdout: version } = yield exec4.getExecOutput('powershell -command "(Get-CimInstance -ClassName Win32_OperatingSystem).Version"', void 0, {
+      const { stdout: version } = yield exec5.getExecOutput('powershell -command "(Get-CimInstance -ClassName Win32_OperatingSystem).Version"', void 0, {
         silent: true
       });
-      const { stdout: name } = yield exec4.getExecOutput('powershell -command "(Get-CimInstance -ClassName Win32_OperatingSystem).Caption"', void 0, {
+      const { stdout: name } = yield exec5.getExecOutput('powershell -command "(Get-CimInstance -ClassName Win32_OperatingSystem).Caption"', void 0, {
         silent: true
       });
       return {
@@ -19539,7 +19539,7 @@ var require_platform = __commonJS({
     });
     var getMacOsInfo = () => __awaiter(void 0, void 0, void 0, function* () {
       var _a2, _b, _c, _d;
-      const { stdout } = yield exec4.getExecOutput("sw_vers", void 0, {
+      const { stdout } = yield exec5.getExecOutput("sw_vers", void 0, {
         silent: true
       });
       const version = (_b = (_a2 = stdout.match(/ProductVersion:\s*(.+)/)) === null || _a2 === void 0 ? void 0 : _a2[1]) !== null && _b !== void 0 ? _b : "";
@@ -19550,7 +19550,7 @@ var require_platform = __commonJS({
       };
     });
     var getLinuxInfo = () => __awaiter(void 0, void 0, void 0, function* () {
-      const { stdout } = yield exec4.getExecOutput("lsb_release", ["-i", "-r", "-s"], {
+      const { stdout } = yield exec5.getExecOutput("lsb_release", ["-i", "-r", "-s"], {
         silent: true
       });
       const [name, version] = stdout.trim().split("\n");
@@ -23872,7 +23872,7 @@ var require_github = __commonJS({
 
 // src/preview.ts
 var import_core = __toESM(require_core());
-var exec2 = __toESM(require_exec());
+var exec3 = __toESM(require_exec());
 
 // node_modules/stainless/internal/tslib.mjs
 function __classPrivateFieldSet(receiver, state, value, kind, f) {
@@ -25723,6 +25723,12 @@ async function isConfigChanged({
   oasPath,
   configPath
 }) {
+  await exec.exec("git", ["fetch", "--depth=1", "origin", before], {
+    silent: true
+  });
+  await exec.exec("git", ["fetch", "--depth=1", "origin", after], {
+    silent: true
+  });
   const diffOutput = await exec.getExecOutput("git", [
     "diff",
     "--name-only",
@@ -25904,7 +25910,7 @@ async function main() {
     });
     (0, import_core.endGroup)();
     (0, import_core.startGroup)("Running builds");
-    await exec2.exec("git", ["checkout", headSha], { silent: true });
+    await exec3.exec("git", ["checkout", headSha], { silent: true });
     const { outcomes, baseOutcomes } = await runBuilds({
       stainless,
       oasPath,
@@ -25944,13 +25950,13 @@ async function getParentCommits({
   baseRef,
   defaultBranch
 }) {
-  await exec2.exec("git", ["fetch", "--depth=1", "origin", baseSha], {
+  await exec3.exec("git", ["fetch", "--depth=1", "origin", baseSha], {
     silent: true
   });
   let mergeBaseSha;
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
-      const output = await exec2.getExecOutput(
+      const output = await exec3.getExecOutput(
         "git",
         ["merge-base", headSha, baseSha],
         { silent: true }
@@ -25959,7 +25965,7 @@ async function getParentCommits({
       if (mergeBaseSha) break;
     } catch {
     }
-    await exec2.exec(
+    await exec3.exec(
       "git",
       ["fetch", "--quiet", "--deepen=10", "origin", baseSha, headSha],
       { silent: true }
@@ -25986,13 +25992,13 @@ async function computeBaseRevision({
 }) {
   if (mergeBaseSha) {
     let hashes = {};
-    await exec2.exec("git", ["checkout", mergeBaseSha], { silent: true });
+    await exec3.exec("git", ["checkout", mergeBaseSha], { silent: true });
     for (const [path2, file] of [
       [oasPath, "openapi.yml"],
       [configPath, "openapi.stainless.yml"]
     ]) {
       if (path2) {
-        await exec2.getExecOutput("md5sum", [path2], { silent: true }).then(({ stdout }) => {
+        await exec3.getExecOutput("md5sum", [path2], { silent: true }).then(({ stdout }) => {
           hashes[file] = { hash: stdout.split(" ")[0] };
         }).catch(() => {
           console.log(`File ${path2} does not exist at merge base.`);

@@ -11,6 +11,13 @@ export async function isConfigChanged({
   oasPath?: string;
   configPath?: string;
 }): Promise<boolean> {
+  await exec.exec("git", ["fetch", "--depth=1", "origin", before], {
+    silent: true,
+  });
+  await exec.exec("git", ["fetch", "--depth=1", "origin", after], {
+    silent: true,
+  });
+
   const diffOutput = await exec.getExecOutput("git", [
     "diff",
     "--name-only",
