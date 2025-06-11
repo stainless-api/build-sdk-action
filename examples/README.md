@@ -20,7 +20,7 @@ By default, the pull request workflow uses the title of the pull request as the 
 
 ## Push workflows
 
-The other kind of workflows are the push-based workflows, such as [push.yml](./push.yml). If some changes to your OpenAPI spec are made via direct pushes to your repository, we recommend using this workflow. It has one job:
+The other kind of workflows are the push-based workflows, such as [push.yml](./push.yml). If for some reason you can't use the pull-request-based workflows, you can use this workflow. It has one job:
 
 * `build`, which runs when a commit is pushed to a branch you specify. The job creates a build of your SDK against the latest commit on that branch.
 
