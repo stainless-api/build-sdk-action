@@ -58,15 +58,10 @@ export async function runBuilds({
     throw new Error("Cannot specify both base_revision and merge_branch");
   }
   if (commitMessage && !isValidConventionalCommitMessage(commitMessage)) {
-    if (branch === "main") {
-      throw new Error(
-        `Invalid commit message: "${commitMessage}". Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/`,
-      );
-    } else {
-      console.warn(
-        `Commit message: "${commitMessage}" is not in Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/, using anyway`,
-      );
-    }
+    console.warn(
+      `Commit message: "${commitMessage}" is not in Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/. Prepending "feat" and using anyway.`,
+    );
+    commitMessage = `feat: ${commitMessage}`;
   }
 
   const oasContent = oasPath ? fs.readFileSync(oasPath, "utf-8") : undefined;
@@ -237,7 +232,7 @@ async function pollBuild({
       }
     }
 
-    // API only returns "content" for now; need to support "url" in the future
+    // TODO: API only returns "content" for now; need to support "url" in the future
     if (!documentedSpec && build.documented_spec?.type === "content") {
       documentedSpec = build.documented_spec.content;
     }

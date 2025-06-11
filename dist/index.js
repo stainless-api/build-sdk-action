@@ -21451,15 +21451,10 @@ async function runBuilds({
     throw new Error("Cannot specify both base_revision and merge_branch");
   }
   if (commitMessage && !isValidConventionalCommitMessage(commitMessage)) {
-    if (branch === "main") {
-      throw new Error(
-        `Invalid commit message: "${commitMessage}". Please follow the Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/`
-      );
-    } else {
-      console.warn(
-        `Commit message: "${commitMessage}" is not in Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/, using anyway`
-      );
-    }
+    console.warn(
+      `Commit message: "${commitMessage}" is not in Conventional Commits format: https://www.conventionalcommits.org/en/v1.0.0/. Prepending "feat" and using anyway.`
+    );
+    commitMessage = `feat: ${commitMessage}`;
   }
   const oasContent = oasPath ? fs.readFileSync(oasPath, "utf-8") : void 0;
   let configContent = configPath ? fs.readFileSync(configPath, "utf-8") : void 0;
