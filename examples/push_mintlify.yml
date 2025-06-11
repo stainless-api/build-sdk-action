@@ -46,6 +46,7 @@ env:
   # In your repo secrets, configure:
   # - STAINLESS_API_KEY: a Stainless API key, which you can generate on the
   #   Stainless organization dashboard
+  #
   # - API_TOKEN_GITHUB: a GitHub personal access token with permissions to
   #   write to the Mintlify repo
 

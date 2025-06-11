@@ -37,9 +37,13 @@ env:
   # In your repo secrets, configure:
   # - STAINLESS_API_KEY: a Stainless API key, which you can generate on the
   #   Stainless organization dashboard
-  # - README_TOKEN: a ReadMe API key
+  #
+  # - README_TOKEN: a ReadMe API key; see
+  #   https://docs.readme.com/main/reference/intro/authentication#api-key-quick-start
+  #
   # - README_DEFINITION_ID: the ReadMe project API definition ID, viewable when
-  #   editing a ReadMe project API definition
+  #   editing a ReadMe project API definition; see
+  #   https://docs.readme.com/main/docs/openapi-resyncing#api-definition-ids
 
 jobs:
   preview:
@@ -95,6 +99,8 @@ jobs:
           commit_message: ${{ env.COMMIT_MESSAGE }}
           fail_on: ${{ env.FAIL_ON }}
 
+      # Remember to set the readmeio/rdme ref to the latest stable version:
+      # https://github.com/marketplace/actions/rdme-sync-to-readme
       - name: Push spec to ReadMe
         uses: readmeio/rdme@v10
         with:
