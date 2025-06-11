@@ -30,6 +30,6 @@ By default, the push workflow uses the same commit message.
 
 If your Stainless config has code samples configured, the `merge` and `build` actions also output a `documented_spec_path` containing a path to your OpenAPI spec with SDK code samples.
 
-If you sync your OpenAPI spec with a [ReadMe API Reference](https://readme.com/), you can use the [Sync to ReadMe](https://github.com/marketplace/actions/rdme-sync-to-readme) GitHub action to upload the documented spec to ReadMe. You can see examples of this in the [`pull_request_readme.yml`](./pull_request_readme.yml) and [`push_readme.yml`](./push_readme.yml) files.
+If you sync your OpenAPI spec with a [ReadMe API Reference](https://readme.com/), you can use the [Sync to ReadMe](https://github.com/marketplace/actions/rdme-sync-to-readme) GitHub action to upload the documented spec to ReadMe. You can see examples of this in the [pull_request_readme.yml](./pull_request_readme.yml) and [push_readme.yml](./push_readme.yml) files.
 
-If you use [Mintlify's OpenAPI support](https://mintlify.com/docs/api-playground/openapi-setup#in-the-repo) for your API reference doucmentation, you can copy the documented spec to your Mintlify docs repo to update it. You can see examples of this in the [`pull_request_mintlify.yml`](./pull_request_mintlify.yml) and [`push_mintlify.yml`](./push_mintlify.yml) files.
+If you use [Mintlify's OpenAPI support](https://mintlify.com/docs/api-playground/openapi-setup#in-the-repo) for your API reference doucmentation, you can copy the documented spec to your Mintlify docs repo to update it. You can see examples of this in the [pull_request_mintlify.yml](./pull_request_mintlify.yml) and [push_mintlify.yml](./push_mintlify.yml) files.
