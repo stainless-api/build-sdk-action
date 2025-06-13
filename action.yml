@@ -14,10 +14,14 @@ inputs:
     description: Stainless project name.
     required: true
   oas_path:
-    description: Path to your OpenAPI spec.
+    description: >-
+      Path to your OpenAPI spec. If omitted, and `merge_branch` is false,
+      will use the existing OpenAPI spec on the Stainless branch.
     required: false
   config_path:
-    description: Path to your Stainless config.
+    description: >-
+      Path to your Stainless config. If omitted, and `merge_branch` is false,
+      will use the existing Stainless config on the Stainless branch.
     required: false
   commit_message:
     description: >-
@@ -26,14 +30,19 @@ inputs:
       https://www.conventionalcommits.org/en/v1.0.0/
     required: false
   guess_config:
-    description: If true, regenerate the endpoints in the Stainless config file.
+    description: >-
+      If true, update the existing Stainless config file based on the OpenAPI
+      spec. Cannot be specified if `config_path` is specified.
     required: false
   branch:
     description: Stainless branch to create the build on.
     required: false
     default: main
   merge_branch:
-    description: Stainless branch that this build is merging in changes from.
+    description: >-
+      Stainless branch to merge changes from. The OpenAPI spec and Stainless
+      config from the `merge_branch` will be used to create a build on top of
+      the Stainless branch.
     required: false
   base_revision:
     description: >-
