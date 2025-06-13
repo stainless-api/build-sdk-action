@@ -19,7 +19,9 @@ inputs:
   config_path:
     description: >-
       Path to your Stainless config. Optional; only provide this if you prefer
-      to maintain the ground truth Stainless config in your own repo.
+      to maintain the ground truth Stainless config in your own repo. If
+      omitted, the existing Stainless config will be updated based on the
+      OpenAPI spec.
     required: false
   commit_message:
     description: >-
