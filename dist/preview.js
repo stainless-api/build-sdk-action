@@ -25830,25 +25830,14 @@ function generatePreviewComment({
     const githubLink = githubUrl ? `[Branch](${githubUrl})` : "";
     const studioLink = studioUrl ? `[Studio](${studioUrl})` : "";
     const compareLink = compareUrl ? `[Diff](${compareUrl})` : "";
-    let ci;
-    const steps = ["lint", "test"];
-    if (steps.some(
-      (key) => !outcome[key] || outcome[key].status !== "completed"
-    )) {
-      ci = "pending";
-    } else if (steps.every(
-      (key) => !outcome[key] || outcome[key].completed.conclusion === "success"
-    )) {
-      ci = "success";
-    } else {
-      ci = "error";
-    }
+    const lint = outcome.lint?.status === "completed" ? outcome.lint.completed.conclusion : "pending";
+    const test = outcome.test?.status === "completed" ? outcome.test.completed.conclusion : "pending";
     return `
-| ${lang} | ${completedCommit.conclusion} | ${ci} | ${githubLink} | ${studioLink} | ${compareLink} | ${notes} |`;
+| ${lang} | ${completedCommit.conclusion} | ${lint} | ${test} | ${githubLink} | ${studioLink} | ${compareLink} | ${notes} |`;
   };
   const header = `
-| Language | Conclusion | CI | Branch | Studio | Diff | Notes |
-|----------|------------|----|--------|--------|------|-------|`;
+| Language | Conclusion | Lint | Test | Branch | Studio | Diff | Notes |
+|----------|------------|------|------|--------|--------|------|-------|`;
   const tableRows = Object.keys(outcomes).map((lang) => {
     return generateRow(lang, outcomes[lang], baseOutcomes?.[lang]);
   }).join("");
