@@ -75,7 +75,7 @@ export function generatePreviewComment({
     }
 
     return `
-| ${lang} | ${completedCommit.conclusion} | ${githubLink} | ${studioLink} | ${compareLink} | ${notes} |`;
+| ${lang} | ${completedCommit.conclusion} | ${ci} | ${githubLink} | ${studioLink} | ${compareLink} | ${notes} |`;
   };
 
   const header = `

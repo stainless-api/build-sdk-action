@@ -25849,7 +25849,7 @@ function generatePreviewComment({
       ci = "error";
     }
     return `
-| ${lang} | ${completedCommit.conclusion} | ${githubLink} | ${studioLink} | ${compareLink} | ${notes} |`;
+| ${lang} | ${completedCommit.conclusion} | ${ci} | ${githubLink} | ${studioLink} | ${compareLink} | ${notes} |`;
   };
   const header = `
 | Language | Conclusion | CI | Branch | Studio | Diff | Notes |
