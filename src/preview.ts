@@ -67,14 +67,13 @@ async function main() {
     });
 
     endGroup();
-    startGroup("Running builds");
 
     // Checkout HEAD for runBuilds to pull the files of:
     await exec.exec("git", ["checkout", headSha], { silent: true });
 
     let latestRun;
 
-    for await (const run of runBuilds({
+    const generator = runBuilds({
       stainless,
       oasPath,
       configPath,
@@ -84,8 +83,29 @@ async function main() {
       branch,
       guessConfig: !configPath,
       commitMessage,
-    })) {
-      latestRun = run;
+    })
+
+    while (true) {
+      startGroup("Running builds");
+
+      const run = await generator.next();
+
+      endGroup();
+
+      if (run.done) {
+        const { outcomes, baseOutcomes } = latestRun!;
+
+        setOutput("outcomes", outcomes);
+        setOutput("base_outcomes", baseOutcomes);
+
+        if (!checkResults({ outcomes, failRunOn })) {
+          process.exit(1);
+        }
+
+        break;
+      }
+
+      latestRun = run.value;
 
       const {outcomes, baseOutcomes} = latestRun;
 
@@ -105,16 +125,6 @@ async function main() {
       }
     } 
 
-    const { outcomes, baseOutcomes } = latestRun!;
-
-    setOutput("outcomes", outcomes);
-    setOutput("base_outcomes", baseOutcomes);
-
-    endGroup();
-
-    if (!checkResults({ outcomes, failRunOn })) {
-      process.exit(1);
-    }
   } catch (error) {
     console.error("Error in preview action:", error);
     process.exit(1);
