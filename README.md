@@ -5,19 +5,91 @@ previewing changes to an SDK from a pull request.
 
 ## Usage
 
-Get an API key from your Stainless organization dashboard, and add it to your
+Get an API key from your Stainless organization dashboard. In the GitHub
+repository that stores your ground truth OpenAPI spec, add the key to the
 [repository secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions#creating-secrets-for-a-repository)
 with the name `STAINLESS_API_KEY`. You can do this with the GitHub CLI via:
 
-```
+```bash
 gh secret set STAINLESS_API_KEY
 ```
 
-Copy the [example workflow](./examples/pull_request.yml) to your repository's
-`.github/workflows` directory, and replace the `env` variables as needed.
+In the same repository, add a new workflow file:
 
-Pull requests to your GitHub repository that update OpenAPI spec or Stainless
-config will build your SDKs and make a comment with the results.
+<details>
+<summary><code>.github/workflows/stainless.yml</code></summary>
+
+```yml
+name: Build SDKs for pull request
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - closed
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  STAINLESS_ORG: YOUR_ORG
+  STAINLESS_PROJECT: YOUR_PROJECT
+  OAS_PATH: YOUR_OAS_PATH
+  COMMIT_MESSAGE: ${{ github.event.pull_request.title }}
+
+jobs:
+  preview:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Run preview builds
+        uses: stainless-api/build-sdk-action/preview@599f841f133cc18bb54cc69fecbaf8893f9c3a57
+        with:
+          stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
+          org: ${{ env.STAINLESS_ORG }}
+          project: ${{ env.STAINLESS_PROJECT }}
+          oas_path: ${{ env.OAS_PATH }}
+          commit_message: ${{ env.COMMIT_MESSAGE }}
+
+  merge:
+    if: github.event.action == 'closed' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Run merge build
+        uses: stainless-api/build-sdk-action/merge@599f841f133cc18bb54cc69fecbaf8893f9c3a57
+        with:
+          stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
+          org: ${{ env.STAINLESS_ORG }}
+          project: ${{ env.STAINLESS_PROJECT }}
+          oas_path: ${{ env.OAS_PATH }}
+          commit_message: ${{ env.COMMIT_MESSAGE }}
+```
+</details>
+
+Then, pull requests to your GitHub repository that update OpenAPI spec or
+Stainless config will build your SDKs and make a comment with the results.
+
+For more details about the input parameters, see the
+[example workflow](./examples/pull_request.yml) file.
 
 For more examples of usage, including push-based workflows, using code samples,
 and integration with docs platforms, see the [examples directory](./examples).

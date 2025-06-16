@@ -28,12 +28,14 @@ jobs:
             git commit -m "chore(build): Update dist [skip ci]"
           fi
           echo "current_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
-      - name: Update sample workflow and push
+      - name: Update sample workflows and push
         if: ${{ github.ref == 'refs/heads/main' }}
         run: |
           sed -i -r -e \
             's/stainless-api\/build-sdk-action(\/?[^@]*)@.*/stainless-api\/build-sdk-action\1@${{ steps.current_sha.outputs.current_sha }}/g' \
+            README.md \
             examples/*.yml
+          git add README.md
           git add examples
           if git diff --cached --quiet HEAD; then
             echo "No changes to commit."
