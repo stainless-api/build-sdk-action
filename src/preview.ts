@@ -6,7 +6,7 @@ import {
   startGroup,
 } from "@actions/core";
 import * as exec from "@actions/exec";
-import { StainlessV0 as Stainless } from "stainless";
+import { Stainless } from "stainless";
 import { checkResults, runBuilds } from "./build";
 import { isConfigChanged } from "./config";
 import { generatePreviewComment, upsertComment } from "./comment";
@@ -34,7 +34,7 @@ async function main() {
       throw new Error("github_token is required to make a comment");
     }
 
-    const stainless = new Stainless({ apiKey, logLevel: "warn" });
+    const stainless = new Stainless({ project: "stainless-v0", apiKey, logLevel: "warn" });
 
     startGroup("Getting parent revision");
 
@@ -72,7 +72,7 @@ async function main() {
     // Checkout HEAD for runBuilds to pull the files of:
     await exec.exec("git", ["checkout", headSha], { silent: true });
 
-    const { outcomes, baseOutcomes } = await runBuilds({
+    for await (const { outcomes, baseOutcomes } of runBuilds({
       stainless,
       oasPath,
       configPath,
@@ -82,31 +82,31 @@ async function main() {
       branch,
       guessConfig: !configPath,
       commitMessage,
-    });
-
-    setOutput("outcomes", outcomes);
-    setOutput("base_outcomes", baseOutcomes);
-
-    endGroup();
-
-    if (makeComment) {
-      startGroup("Creating comment");
-
-      const commentBody = generatePreviewComment({
-        outcomes,
-        baseOutcomes,
-        orgName,
-        projectName,
-      });
-
-      await upsertComment({ body: commentBody, token: githubToken });
+    })) {
+      setOutput("outcomes", outcomes);
+      setOutput("base_outcomes", baseOutcomes);
 
       endGroup();
-    }
 
-    if (!checkResults({ outcomes, failRunOn })) {
-      process.exit(1);
-    }
+      if (makeComment) {
+        startGroup("Creating comment");
+
+        const commentBody = generatePreviewComment({
+          outcomes,
+          baseOutcomes,
+          orgName,
+          projectName,
+        });
+
+        await upsertComment({ body: commentBody, token: githubToken });
+
+        endGroup();
+      }
+
+      if (!checkResults({ outcomes, failRunOn })) {
+        process.exit(1);
+      }
+    } 
   } catch (error) {
     console.error("Error in preview action:", error);
     process.exit(1);

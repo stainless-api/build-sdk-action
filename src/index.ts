@@ -1,5 +1,5 @@
 import { getBooleanInput, getInput, setOutput } from "@actions/core";
-import { StainlessV0 as Stainless } from "stainless";
+import {  Stainless } from "stainless";
 import { runBuilds } from "./build";
 
 async function main() {
@@ -21,9 +21,9 @@ async function main() {
       getInput("base_branch", { required: false }) || undefined;
     const outputDir = getInput("output_dir", { required: false }) || undefined;
 
-    const stainless = new Stainless({ apiKey, logLevel: "warn" });
+    const stainless = new Stainless({ project: "stainless-v0", apiKey, logLevel: "warn" });
 
-    const { baseOutcomes, outcomes, documentedSpecPath } = await runBuilds({
+    for await (const { baseOutcomes, outcomes, documentedSpecPath } of runBuilds({
       stainless,
       projectName,
       baseRevision,
@@ -34,12 +34,11 @@ async function main() {
       configPath,
       guessConfig,
       commitMessage,
-      outputDir,
-    });
-
-    setOutput("outcomes", outcomes);
-    setOutput("base_outcomes", baseOutcomes);
-    setOutput("documented_spec_path", documentedSpecPath);
+    })) {
+      setOutput("outcomes", outcomes);
+      setOutput("base_outcomes", baseOutcomes);
+      setOutput("documented_spec_path", documentedSpecPath);
+    }
   } catch (error) {
     console.error("Error interacting with API:", error);
     process.exit(1);

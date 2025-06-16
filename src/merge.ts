@@ -5,7 +5,7 @@ import {
   setOutput,
   startGroup,
 } from "@actions/core";
-import { StainlessV0 as Stainless } from "stainless";
+import { Stainless } from "stainless";
 import { isConfigChanged } from "./config";
 import { checkResults, runBuilds } from "./build";
 import { generateMergeComment, upsertComment } from "./comment";
@@ -38,7 +38,7 @@ async function main() {
       return;
     }
 
-    const stainless = new Stainless({ apiKey, logLevel: "warn" });
+    const stainless = new Stainless({ project: "stainless-v0", apiKey, logLevel: "warn" });
 
     const configChanged = await isConfigChanged({
       before: baseSha,
@@ -54,7 +54,7 @@ async function main() {
 
     startGroup("Running builds");
 
-    const { outcomes, documentedSpecPath } = await runBuilds({
+    for await (const { outcomes, documentedSpecPath } of runBuilds({
       stainless,
       projectName,
       commitMessage,
@@ -63,29 +63,43 @@ async function main() {
       mergeBranch,
       guessConfig: false,
       outputDir,
-    });
-
-    setOutput("outcomes", outcomes);
-    setOutput("documented_spec_path", documentedSpecPath);
-
-    endGroup();
-
-    if (makeComment) {
-      startGroup("Creating comment");
-
-      const commentBody = generateMergeComment({
-        outcomes,
-        orgName,
-        projectName,
-      });
-
-      await upsertComment({ body: commentBody, token: githubToken });
+    })) {
+      setOutput("outcomes", outcomes);
+      setOutput("documented_spec_path", documentedSpecPath);
 
       endGroup();
-    }
 
-    if (!checkResults({ outcomes, failRunOn })) {
-      process.exit(1);
+      if (makeComment) {
+        startGroup("Creating comment");
+
+        const commentBody = generateMergeComment({
+          outcomes,
+          orgName,
+          projectName,
+        });
+
+        await upsertComment({ body: commentBody, token: githubToken });
+
+        endGroup();
+
+        if (makeComment) {
+          startGroup("Creating comment");
+
+          const commentBody = generateMergeComment({
+            outcomes,
+            orgName,
+            projectName,
+          });
+
+          await upsertComment({ body: commentBody, token: githubToken });
+
+          endGroup();
+        }
+
+        if (!checkResults({ outcomes, failRunOn })) {
+          process.exit(1);
+        }
+      }
     }
   } catch (error) {
     console.error("Error in merge action:", error);
