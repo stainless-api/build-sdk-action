@@ -21,7 +21,7 @@ async function main() {
       getInput("base_branch", { required: false }) || undefined;
     const outputDir = getInput("output_dir", { required: false }) || undefined;
 
-    const stainless = new Stainless({ project: "stainless-v0", apiKey, logLevel: "warn" });
+    const stainless = new Stainless({ project: projectName, apiKey, logLevel: "warn" });
 
     for await (const { baseOutcomes, outcomes, documentedSpecPath } of runBuilds({
       stainless,
@@ -34,6 +34,7 @@ async function main() {
       configPath,
       guessConfig,
       commitMessage,
+      outputDir,
     })) {
       setOutput("outcomes", outcomes);
       setOutput("base_outcomes", baseOutcomes);

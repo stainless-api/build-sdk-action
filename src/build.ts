@@ -139,7 +139,6 @@ export async function *runBuilds({
   console.log(`Hard reset ${branch}, now at ${config_commit.sha}`);
 
   const { base, head } = await stainless.builds.compare({
-    project: projectName,
     base: {
       revision: baseRevision,
       branch: baseBranch,

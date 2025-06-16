@@ -38,7 +38,7 @@ async function main() {
       return;
     }
 
-    const stainless = new Stainless({ project: "stainless-v0", apiKey, logLevel: "warn" });
+    const stainless = new Stainless({ project: projectName, apiKey, logLevel: "warn" });
 
     const configChanged = await isConfigChanged({
       before: baseSha,

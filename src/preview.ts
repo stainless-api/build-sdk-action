@@ -34,7 +34,7 @@ async function main() {
       throw new Error("github_token is required to make a comment");
     }
 
-    const stainless = new Stainless({ project: "stainless-v0", apiKey, logLevel: "warn" });
+    const stainless = new Stainless({ project: projectName, apiKey, logLevel: "warn" });
 
     startGroup("Getting parent revision");
 

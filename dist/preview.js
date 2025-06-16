@@ -25605,7 +25605,6 @@ async function* runBuilds({
   );
   console.log(`Hard reset ${branch}, now at ${config_commit.sha}`);
   const { base, head } = await stainless.builds.compare({
-    project: projectName,
     base: {
       revision: baseRevision,
       branch: baseBranch,
@@ -25956,7 +25955,7 @@ async function main() {
     if (makeComment && !githubToken) {
       throw new Error("github_token is required to make a comment");
     }
-    const stainless = new Stainless({ project: "stainless-v0", apiKey, logLevel: "warn" });
+    const stainless = new Stainless({ project: projectName, apiKey, logLevel: "warn" });
     (0, import_core.startGroup)("Getting parent revision");
     const { mergeBaseSha, nonMainBaseRef } = await getParentCommits({
       baseSha,

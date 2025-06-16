@@ -21542,7 +21542,6 @@ async function* runBuilds({
   );
   console.log(`Hard reset ${branch}, now at ${config_commit.sha}`);
   const { base, head } = await stainless.builds.compare({
-    project: projectName,
     base: {
       revision: baseRevision,
       branch: baseBranch,
@@ -21673,7 +21672,7 @@ async function main() {
     const baseRevision = (0, import_core.getInput)("base_revision", { required: false }) || void 0;
     const baseBranch = (0, import_core.getInput)("base_branch", { required: false }) || void 0;
     const outputDir = (0, import_core.getInput)("output_dir", { required: false }) || void 0;
-    const stainless = new Stainless({ project: "stainless-v0", apiKey, logLevel: "warn" });
+    const stainless = new Stainless({ project: projectName, apiKey, logLevel: "warn" });
     for await (const { baseOutcomes, outcomes, documentedSpecPath } of runBuilds({
       stainless,
       projectName,
@@ -21684,7 +21683,8 @@ async function main() {
       oasPath,
       configPath,
       guessConfig,
-      commitMessage
+      commitMessage,
+      outputDir
     })) {
       (0, import_core.setOutput)("outcomes", outcomes);
       (0, import_core.setOutput)("base_outcomes", baseOutcomes);

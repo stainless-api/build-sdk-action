@@ -25637,7 +25637,6 @@ async function* runBuilds({
   );
   console.log(`Hard reset ${branch}, now at ${config_commit.sha}`);
   const { base, head } = await stainless.builds.compare({
-    project: projectName,
     base: {
       revision: baseRevision,
       branch: baseBranch,
@@ -25874,7 +25873,7 @@ async function main() {
       console.log("Not merging to default branch, skipping merge");
       return;
     }
-    const stainless = new Stainless({ project: "stainless-v0", apiKey, logLevel: "warn" });
+    const stainless = new Stainless({ project: projectName, apiKey, logLevel: "warn" });
     const configChanged = await isConfigChanged({
       before: baseSha,
       after: headSha,
