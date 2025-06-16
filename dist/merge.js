@@ -23935,9 +23935,9 @@ var castToError = (err) => {
 };
 
 // node_modules/stainless/core/error.mjs
-var StainlessV0Error = class extends Error {
+var StainlessError = class extends Error {
 };
-var APIError = class _APIError extends StainlessV0Error {
+var APIError = class _APIError extends StainlessError {
   constructor(status, error, message, headers) {
     super(`${_APIError.makeMessage(status, error, message)}`);
     this.status = status;
@@ -24040,10 +24040,10 @@ function hasOwn(obj, key) {
 }
 var validatePositiveInteger = (name, n) => {
   if (typeof n !== "number" || !Number.isInteger(n)) {
-    throw new StainlessV0Error(`${name} must be an integer`);
+    throw new StainlessError(`${name} must be an integer`);
   }
   if (n < 0) {
-    throw new StainlessV0Error(`${name} must be a positive integer`);
+    throw new StainlessError(`${name} must be a positive integer`);
   }
   return n;
 };
@@ -24132,7 +24132,7 @@ var formatRequestDetails = (details) => {
 };
 
 // node_modules/stainless/version.mjs
-var VERSION = "0.1.0-alpha.3";
+var VERSION = "0.1.0-alpha.4";
 
 // node_modules/stainless/internal/detect-platform.mjs
 function getDetectedPlatform() {
@@ -24173,10 +24173,10 @@ var getPlatformProperties = () => {
     return {
       "X-Stainless-Lang": "js",
       "X-Stainless-Package-Version": VERSION,
-      "X-Stainless-OS": normalizePlatform(globalThis.process.platform),
-      "X-Stainless-Arch": normalizeArch(globalThis.process.arch),
+      "X-Stainless-OS": normalizePlatform(globalThis.process.platform ?? "unknown"),
+      "X-Stainless-Arch": normalizeArch(globalThis.process.arch ?? "unknown"),
       "X-Stainless-Runtime": "node",
-      "X-Stainless-Runtime-Version": globalThis.process.version
+      "X-Stainless-Runtime-Version": globalThis.process.version ?? "unknown"
     };
   }
   const browserInfo = getBrowserInfo();
@@ -24265,7 +24265,7 @@ function getDefaultFetch() {
   if (typeof fetch !== "undefined") {
     return fetch;
   }
-  throw new Error("`fetch` is not defined as a global; Either pass `fetch` to the client, `new StainlessV0({ fetch })` or polyfill the global, `globalThis.fetch = fetch`");
+  throw new Error("`fetch` is not defined as a global; Either pass `fetch` to the client, `new Stainless({ fetch })` or polyfill the global, `globalThis.fetch = fetch`");
 }
 function makeReadableStream(...args) {
   const ReadableStream = globalThis.ReadableStream;
@@ -24759,8 +24759,8 @@ var APIResource = class {
   }
 };
 
-// node_modules/stainless/resources/build-target-outputs.mjs
-var BuildTargetOutputs = class extends APIResource {
+// node_modules/stainless/resources/builds/target-outputs.mjs
+var TargetOutputs = class extends APIResource {
   /**
    * Download the output of a build target
    */
@@ -24801,7 +24801,7 @@ var createPathTagFunction = (pathEncoder = encodeURIPath) => function path2(stat
       lastEnd = segment.start + segment.length;
       return acc + spaces + arrows;
     }, "");
-    throw new StainlessV0Error(`Path parameters result in path with invalid segments:
+    throw new StainlessError(`Path parameters result in path with invalid segments:
 ${path3}
 ${underline}`);
   }
@@ -24809,13 +24809,18 @@ ${underline}`);
 };
 var path = createPathTagFunction(encodeURIPath);
 
-// node_modules/stainless/resources/builds.mjs
+// node_modules/stainless/resources/builds/builds.mjs
 var Builds = class extends APIResource {
+  constructor() {
+    super(...arguments);
+    this.targetOutputs = new TargetOutputs(this._client);
+  }
   /**
    * Create a new build
    */
-  create(body, options) {
-    return this._client.post("/v0/builds", { body, ...options });
+  create(params, options) {
+    const { project = this._client.project, ...body } = params;
+    return this._client.post("/v0/builds", { body: { project, ...body }, ...options });
   }
   /**
    * Retrieve a build by ID
@@ -24826,24 +24831,27 @@ var Builds = class extends APIResource {
   /**
    * List builds for a project
    */
-  list(query, options) {
-    return this._client.get("/v0/builds", { query, ...options });
+  list(params = {}, options) {
+    const { project = this._client.project, ...query } = params ?? {};
+    return this._client.get("/v0/builds", { query: { project, ...query }, ...options });
   }
   /**
    * Creates two builds whose outputs can be compared directly
    */
-  compare(body, options) {
-    return this._client.post("/v0/builds/compare", { body, ...options });
+  compare(params, options) {
+    const { project = this._client.project, ...body } = params;
+    return this._client.post("/v0/builds/compare", { body: { project, ...body }, ...options });
   }
 };
+Builds.TargetOutputs = TargetOutputs;
 
 // node_modules/stainless/resources/orgs.mjs
 var Orgs = class extends APIResource {
   /**
    * Retrieve an organization by name
    */
-  retrieve(orgName, options) {
-    return this._client.get(path`/v0/orgs/${orgName}`, options);
+  retrieve(org, options) {
+    return this._client.get(path`/v0/orgs/${org}`, options);
   }
   /**
    * List organizations the user has access to
@@ -24858,14 +24866,15 @@ var Branches = class extends APIResource {
   /**
    * Create a new branch for a project
    */
-  create(project, body, options) {
+  create(params, options) {
+    const { project = this._client.project, ...body } = params;
     return this._client.post(path`/v0/projects/${project}/branches`, { body, ...options });
   }
   /**
    * Retrieve a project branch
    */
-  retrieve(branch, params, options) {
-    const { project } = params;
+  retrieve(branch, params = {}, options) {
+    const { project = this._client.project } = params ?? {};
     return this._client.get(path`/v0/projects/${project}/branches/${branch}`, options);
   }
 };
@@ -24875,13 +24884,15 @@ var Configs = class extends APIResource {
   /**
    * Retrieve configuration files for a project
    */
-  retrieve(project, query = {}, options) {
+  retrieve(params = {}, options) {
+    const { project = this._client.project, ...query } = params ?? {};
     return this._client.get(path`/v0/projects/${project}/configs`, { query, ...options });
   }
   /**
    * Generate configuration suggestions based on an OpenAPI spec
    */
-  guess(project, body, options) {
+  guess(params, options) {
+    const { project = this._client.project, ...body } = params;
     return this._client.post(path`/v0/projects/${project}/configs/guess`, { body, ...options });
   }
 };
@@ -24902,21 +24913,29 @@ var Projects = class extends APIResource {
     this.snippets = new Snippets(this._client);
   }
   /**
+   * Create a new project
+   */
+  create(body, options) {
+    return this._client.post("/v0/projects", { body, ...options });
+  }
+  /**
    * Retrieve a project by name
    */
-  retrieve(projectName, options) {
-    return this._client.get(path`/v0/projects/${projectName}`, options);
+  retrieve(params = {}, options) {
+    const { project = this._client.project } = params ?? {};
+    return this._client.get(path`/v0/projects/${project}`, options);
   }
   /**
    * Update a project's properties
    */
-  update(projectName, body = {}, options) {
-    return this._client.patch(path`/v0/projects/${projectName}`, { body, ...options });
+  update(params = {}, options) {
+    const { project = this._client.project, ...body } = params ?? {};
+    return this._client.patch(path`/v0/projects/${project}`, { body, ...options });
   }
   /**
    * List projects in an organization
    */
-  list(query, options) {
+  list(query = {}, options) {
     return this._client.get("/v0/projects", { query, ...options });
   }
 };
@@ -25092,13 +25111,14 @@ var readEnv = (env) => {
 
 // node_modules/stainless/client.mjs
 var _a;
-var _StainlessV0_encoder;
-var StainlessV0 = class {
+var _Stainless_encoder;
+var Stainless = class {
   /**
-   * API Client for interfacing with the Stainless V0 API.
+   * API Client for interfacing with the Stainless API.
    *
    * @param {string | null | undefined} [opts.apiKey=process.env['STAINLESS_V0_API_KEY'] ?? null]
-   * @param {string} [opts.baseURL=process.env['STAINLESS_V0_BASE_URL'] ?? https://api.stainless.com] - Override the default base URL for the API.
+   * @param {string} opts.project
+   * @param {string} [opts.baseURL=process.env['STAINLESS_BASE_URL'] ?? https://api.stainless.com] - Override the default base URL for the API.
    * @param {number} [opts.timeout=1 minute] - The maximum amount of time (in milliseconds) the client will wait for a response before timing out.
    * @param {MergedRequestInit} [opts.fetchOptions] - Additional `RequestInit` options to be passed to `fetch` calls.
    * @param {Fetch} [opts.fetch] - Specify a custom `fetch` function implementation.
@@ -25106,14 +25126,17 @@ var StainlessV0 = class {
    * @param {HeadersLike} opts.defaultHeaders - Default headers to include with every request to the API.
    * @param {Record<string, string | undefined>} opts.defaultQuery - Default query parameters to include with every request to the API.
    */
-  constructor({ baseURL = readEnv("STAINLESS_V0_BASE_URL"), apiKey = readEnv("STAINLESS_V0_API_KEY") ?? null, ...opts } = {}) {
-    _StainlessV0_encoder.set(this, void 0);
+  constructor({ baseURL = readEnv("STAINLESS_BASE_URL"), apiKey = readEnv("STAINLESS_V0_API_KEY") ?? null, project, ...opts }) {
+    _Stainless_encoder.set(this, void 0);
     this.projects = new Projects(this);
     this.builds = new Builds(this);
-    this.buildTargetOutputs = new BuildTargetOutputs(this);
     this.orgs = new Orgs(this);
+    if (project === void 0) {
+      throw new StainlessError("Missing required client option project; you need to instantiate the Stainless client with an project option, like new Stainless({ project: 'example-project' }).");
+    }
     const options = {
       apiKey,
+      project,
       ...opts,
       baseURL: baseURL || `https://api.stainless.com`
     };
@@ -25122,13 +25145,14 @@ var StainlessV0 = class {
     this.logger = options.logger ?? console;
     const defaultLogLevel = "warn";
     this.logLevel = defaultLogLevel;
-    this.logLevel = parseLogLevel(options.logLevel, "ClientOptions.logLevel", this) ?? parseLogLevel(readEnv("STAINLESS_V0_LOG"), "process.env['STAINLESS_V0_LOG']", this) ?? defaultLogLevel;
+    this.logLevel = parseLogLevel(options.logLevel, "ClientOptions.logLevel", this) ?? parseLogLevel(readEnv("STAINLESS_LOG"), "process.env['STAINLESS_LOG']", this) ?? defaultLogLevel;
     this.fetchOptions = options.fetchOptions;
     this.maxRetries = options.maxRetries ?? 2;
     this.fetch = options.fetch ?? getDefaultFetch();
-    __classPrivateFieldSet(this, _StainlessV0_encoder, FallbackEncoder, "f");
+    __classPrivateFieldSet(this, _Stainless_encoder, FallbackEncoder, "f");
     this._options = options;
     this.apiKey = apiKey;
+    this.project = project;
   }
   /**
    * Create a new client instance re-using the same options given to the current client with optional overriding.
@@ -25143,6 +25167,7 @@ var StainlessV0 = class {
       logLevel: this.logLevel,
       fetchOptions: this.fetchOptions,
       apiKey: this.apiKey,
+      project: this.project,
       ...options
     });
   }
@@ -25450,31 +25475,30 @@ var StainlessV0 = class {
     } else if (typeof body === "object" && (Symbol.asyncIterator in body || Symbol.iterator in body && "next" in body && typeof body.next === "function")) {
       return { bodyHeaders: void 0, body: ReadableStreamFrom(body) };
     } else {
-      return __classPrivateFieldGet(this, _StainlessV0_encoder, "f").call(this, { body, headers });
+      return __classPrivateFieldGet(this, _Stainless_encoder, "f").call(this, { body, headers });
     }
   }
 };
-_a = StainlessV0, _StainlessV0_encoder = /* @__PURE__ */ new WeakMap();
-StainlessV0.StainlessV0 = _a;
-StainlessV0.DEFAULT_TIMEOUT = 6e4;
-StainlessV0.StainlessV0Error = StainlessV0Error;
-StainlessV0.APIError = APIError;
-StainlessV0.APIConnectionError = APIConnectionError;
-StainlessV0.APIConnectionTimeoutError = APIConnectionTimeoutError;
-StainlessV0.APIUserAbortError = APIUserAbortError;
-StainlessV0.NotFoundError = NotFoundError;
-StainlessV0.ConflictError = ConflictError;
-StainlessV0.RateLimitError = RateLimitError;
-StainlessV0.BadRequestError = BadRequestError;
-StainlessV0.AuthenticationError = AuthenticationError;
-StainlessV0.InternalServerError = InternalServerError;
-StainlessV0.PermissionDeniedError = PermissionDeniedError;
-StainlessV0.UnprocessableEntityError = UnprocessableEntityError;
-StainlessV0.toFile = toFile;
-StainlessV0.Projects = Projects;
-StainlessV0.Builds = Builds;
-StainlessV0.BuildTargetOutputs = BuildTargetOutputs;
-StainlessV0.Orgs = Orgs;
+_a = Stainless, _Stainless_encoder = /* @__PURE__ */ new WeakMap();
+Stainless.Stainless = _a;
+Stainless.DEFAULT_TIMEOUT = 6e4;
+Stainless.StainlessError = StainlessError;
+Stainless.APIError = APIError;
+Stainless.APIConnectionError = APIConnectionError;
+Stainless.APIConnectionTimeoutError = APIConnectionTimeoutError;
+Stainless.APIUserAbortError = APIUserAbortError;
+Stainless.NotFoundError = NotFoundError;
+Stainless.ConflictError = ConflictError;
+Stainless.RateLimitError = RateLimitError;
+Stainless.BadRequestError = BadRequestError;
+Stainless.AuthenticationError = AuthenticationError;
+Stainless.InternalServerError = InternalServerError;
+Stainless.PermissionDeniedError = PermissionDeniedError;
+Stainless.UnprocessableEntityError = UnprocessableEntityError;
+Stainless.toFile = toFile;
+Stainless.Projects = Projects;
+Stainless.Builds = Builds;
+Stainless.Orgs = Orgs;
 
 // src/config.ts
 var exec = __toESM(require_exec());
@@ -25519,7 +25543,7 @@ var isValidConventionalCommitMessage = (message) => {
 };
 var POLLING_INTERVAL_SECONDS = 5;
 var MAX_POLLING_SECONDS = 10 * 60;
-async function runBuilds({
+async function* runBuilds({
   stainless,
   projectName,
   baseRevision,
@@ -25572,24 +25596,24 @@ async function runBuilds({
       commit_message: commitMessage,
       allow_empty: true
     });
-    const { outcomes, documentedSpec } = await pollBuild({ stainless, build });
-    let documentedSpecPath2 = null;
+    const { outcomes, documentedSpec } = await pollBuild({ stainless, build, waitFor: "postgen" });
+    let documentedSpecPath = null;
     if (outputDir && documentedSpec) {
-      documentedSpecPath2 = `${outputDir}/openapi.documented.yml`;
+      documentedSpecPath = `${outputDir}/openapi.documented.yml`;
       fs.mkdirSync(outputDir, { recursive: true });
-      fs.writeFileSync(documentedSpecPath2, documentedSpec);
+      fs.writeFileSync(documentedSpecPath, documentedSpec);
     }
     return {
       baseOutcomes: null,
       outcomes,
-      documentedSpecPath: documentedSpecPath2
+      documentedSpecPath
     };
   }
   if (!configContent) {
     if (guessConfig) {
       console.log("Guessing config before branch reset");
       configContent = Object.values(
-        await stainless.projects.configs.guess(projectName, {
+        await stainless.projects.configs.guess({
           branch,
           spec: oasContent
         })
@@ -25597,7 +25621,7 @@ async function runBuilds({
     } else {
       console.log("Saving config before branch reset");
       configContent = Object.values(
-        await stainless.projects.configs.retrieve(projectName, {
+        await stainless.projects.configs.retrieve({
           branch
         })
       )[0]?.content;
@@ -25605,7 +25629,6 @@ async function runBuilds({
   }
   console.log(`Hard resetting ${branch} to ${baseRevision}`);
   const { config_commit } = await stainless.projects.branches.create(
-    projectName,
     {
       branch_from: baseRevision,
       branch,
@@ -25637,25 +25660,29 @@ async function runBuilds({
       commit_message: commitMessage
     }
   });
-  const results = await Promise.all([
-    pollBuild({ stainless, build: base }),
-    pollBuild({ stainless, build: head })
-  ]);
-  let documentedSpecPath = null;
-  if (outputDir && results[1].documentedSpec) {
-    documentedSpecPath = `${outputDir}/openapi.documented.yml`;
-    fs.mkdirSync(outputDir, { recursive: true });
-    fs.writeFileSync(documentedSpecPath, results[1].documentedSpec);
+  for (const waitFor of ["postgen", "completed"]) {
+    const results = await Promise.all([
+      pollBuild({ stainless, build: base, waitFor }),
+      pollBuild({ stainless, build: head, waitFor })
+    ]);
+    let documentedSpecPath = null;
+    if (outputDir && results[1].documentedSpec) {
+      documentedSpecPath = `${outputDir}/openapi.documented.yml`;
+      fs.mkdirSync(outputDir, { recursive: true });
+      fs.writeFileSync(documentedSpecPath, results[1].documentedSpec);
+    }
+    yield {
+      baseOutcomes: results[0].outcomes,
+      outcomes: results[1].outcomes,
+      documentedSpecPath
+    };
   }
-  return {
-    baseOutcomes: results[0].outcomes,
-    outcomes: results[1].outcomes,
-    documentedSpecPath
-  };
+  return;
 }
 async function pollBuild({
   stainless,
   build,
+  waitFor,
   pollingIntervalSeconds = POLLING_INTERVAL_SECONDS,
   maxPollingSeconds = MAX_POLLING_SECONDS
 }) {
@@ -25677,13 +25704,13 @@ async function pollBuild({
     for (const language of languages) {
       if (!(language in outcomes)) {
         const buildOutput = build2.targets[language];
-        if (buildOutput?.commit.status === "completed") {
+        if (buildOutput?.status === waitFor && buildOutput.commit.status === "completed") {
           const outcome = buildOutput?.commit;
           console.log(
             `[${buildId}] Build completed for ${language} with outcome:`,
             JSON.stringify(outcome)
           );
-          outcomes[language] = outcome.completed;
+          outcomes[language] = { ...buildOutput, commit: buildOutput.commit };
         } else {
           console.log(
             `[${buildId}] Build for ${language} has status ${buildOutput?.commit.status}`
@@ -25706,9 +25733,22 @@ async function pollBuild({
       `[${buildId}] Build for ${language} timed out after ${maxPollingSeconds} seconds`
     );
     outcomes[language] = {
-      conclusion: "timed_out",
-      commit: null,
-      merge_conflict_pr: null
+      object: "build_target",
+      status: "completed",
+      lint: {
+        status: "not_started"
+      },
+      test: {
+        status: "not_started"
+      },
+      commit: {
+        status: "completed",
+        completed: {
+          conclusion: "timed_out",
+          commit: null,
+          merge_conflict_pr: null
+        }
+      }
     };
   }
   return { outcomes, documentedSpec };
@@ -25723,13 +25763,13 @@ function checkResults({
   const failedLanguages = Object.entries(outcomes).filter(([_, outcome]) => {
     if (!outcome.commit) return true;
     if (failRunOn === "error" || failRunOn === "warning" || failRunOn === "note") {
-      if (outcome.conclusion === "error") return true;
+      if (outcome.commit.completed.conclusion === "error") return true;
     }
     if (failRunOn === "warning" || failRunOn === "note") {
-      if (outcome.conclusion === "warning") return true;
+      if (outcome.commit.completed.conclusion === "warning") return true;
     }
     if (failRunOn === "note") {
-      if (outcome.conclusion === "note") return true;
+      if (outcome.commit.completed.conclusion === "note") return true;
     }
     return false;
   });
@@ -25756,7 +25796,7 @@ function generateMergeComment({
     }
     const studioLink = studioUrl ? `[Studio](${studioUrl})` : "";
     return `
-| ${lang} | ${outcome.conclusion} | ${studioLink} |`;
+| ${lang} | ${outcome.commit.completed.conclusion} | ${studioLink} |`;
   };
   const header = `
 | Language | Conclusion | Studio |
@@ -25787,15 +25827,15 @@ async function upsertComment({
     issue_number: github.context.payload.pull_request.number
   });
   const firstLine = body.trim().split("\n")[0];
-  const previewComment = comments.find(
+  const existingComment = comments.find(
     (comment) => comment.body?.includes(firstLine)
   );
-  if (previewComment) {
-    console.log("Updating existing comment:", previewComment.id);
+  if (existingComment) {
+    console.log("Updating existing comment:", existingComment.id);
     await octokit.rest.issues.updateComment({
       owner: github.context.repo.owner,
       repo: github.context.repo.repo,
-      comment_id: previewComment.id,
+      comment_id: existingComment.id,
       body
     });
   } else {
@@ -25834,7 +25874,7 @@ async function main() {
       console.log("Not merging to default branch, skipping merge");
       return;
     }
-    const stainless = new StainlessV0({ apiKey, logLevel: "warn" });
+    const stainless = new Stainless({ project: "stainless-v0", apiKey, logLevel: "warn" });
     const configChanged = await isConfigChanged({
       before: baseSha,
       after: headSha,
@@ -25846,7 +25886,7 @@ async function main() {
       return;
     }
     (0, import_core.startGroup)("Running builds");
-    const { outcomes, documentedSpecPath } = await runBuilds({
+    for await (const { outcomes, documentedSpecPath } of runBuilds({
       stainless,
       projectName,
       commitMessage,
@@ -25855,22 +25895,33 @@ async function main() {
       mergeBranch,
       guessConfig: false,
       outputDir
-    });
-    (0, import_core.setOutput)("outcomes", outcomes);
-    (0, import_core.setOutput)("documented_spec_path", documentedSpecPath);
-    (0, import_core.endGroup)();
-    if (makeComment) {
-      (0, import_core.startGroup)("Creating comment");
-      const commentBody = generateMergeComment({
-        outcomes,
-        orgName,
-        projectName
-      });
-      await upsertComment({ body: commentBody, token: githubToken });
+    })) {
+      (0, import_core.setOutput)("outcomes", outcomes);
+      (0, import_core.setOutput)("documented_spec_path", documentedSpecPath);
       (0, import_core.endGroup)();
-    }
-    if (!checkResults({ outcomes, failRunOn })) {
-      process.exit(1);
+      if (makeComment) {
+        (0, import_core.startGroup)("Creating comment");
+        const commentBody = generateMergeComment({
+          outcomes,
+          orgName,
+          projectName
+        });
+        await upsertComment({ body: commentBody, token: githubToken });
+        (0, import_core.endGroup)();
+        if (makeComment) {
+          (0, import_core.startGroup)("Creating comment");
+          const commentBody2 = generateMergeComment({
+            outcomes,
+            orgName,
+            projectName
+          });
+          await upsertComment({ body: commentBody2, token: githubToken });
+          (0, import_core.endGroup)();
+        }
+        if (!checkResults({ outcomes, failRunOn })) {
+          process.exit(1);
+        }
+      }
     }
   } catch (error) {
     console.error("Error in merge action:", error);
