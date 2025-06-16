@@ -63,7 +63,7 @@ export function generatePreviewComment({
     let ci;
     const steps = ['lint', 'test'] as const
     if (steps.some(
-      (key) => outcome[key] && outcome[key].status !== "completed",
+      (key) => !outcome[key] || outcome[key].status !== "completed",
     )) {
       ci = "pending";
     } else if (steps.every(

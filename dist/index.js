@@ -21620,10 +21620,6 @@ async function pollBuild({
             JSON.stringify(buildOutput)
           );
           outcomes[language] = { ...buildOutput, commit: buildOutput.commit };
-        } else {
-          console.log(
-            `[${buildId}] Build for ${language} has status ${buildOutput?.commit.status}`
-          );
         }
       }
     }
