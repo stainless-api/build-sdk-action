@@ -234,10 +234,9 @@ async function pollBuild({
         );
 
         if (buildOutput && [waitFor, 'completed'].includes(buildOutput.status) && buildOutput.commit.status === "completed") {
-          const outcome = buildOutput.commit;
           console.log(
-            `[${buildId}] Build has outcome:`,
-            JSON.stringify(outcome),
+            `[${buildId}] Build has output:`,
+            JSON.stringify(buildOutput),
           );
           outcomes[language] = {...buildOutput, commit: buildOutput.commit};
         } else {

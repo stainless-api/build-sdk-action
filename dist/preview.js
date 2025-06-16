@@ -25678,10 +25678,9 @@ async function pollBuild({
           `[${buildId}] Build for ${language} has status ${buildOutput?.commit.status}`
         );
         if (buildOutput && [waitFor, "completed"].includes(buildOutput.status) && buildOutput.commit.status === "completed") {
-          const outcome = buildOutput.commit;
           console.log(
-            `[${buildId}] Build has outcome:`,
-            JSON.stringify(outcome)
+            `[${buildId}] Build has output:`,
+            JSON.stringify(buildOutput)
           );
           outcomes[language] = { ...buildOutput, commit: buildOutput.commit };
         } else {
@@ -25838,7 +25837,7 @@ function generatePreviewComment({
     let ci;
     const steps = ["lint", "test", "upload", "build"];
     if (steps.some(
-      (key) => outcome[key]?.status !== "completed"
+      (key) => outcome[key] && outcome[key].status !== "completed"
     )) {
       ci = "pending";
     } else if (steps.every(
