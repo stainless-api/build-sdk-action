@@ -25989,7 +25989,8 @@ async function main() {
     (0, import_core.endGroup)();
     (0, import_core.startGroup)("Running builds");
     await exec3.exec("git", ["checkout", headSha], { silent: true });
-    for await (const { outcomes, baseOutcomes } of runBuilds({
+    let latestRun;
+    for await (const run of runBuilds({
       stainless,
       oasPath,
       configPath,
@@ -26000,23 +26001,26 @@ async function main() {
       guessConfig: !configPath,
       commitMessage
     })) {
-      (0, import_core.setOutput)("outcomes", outcomes);
-      (0, import_core.setOutput)("base_outcomes", baseOutcomes);
-      (0, import_core.endGroup)();
+      latestRun = run;
+      const { outcomes: outcomes2, baseOutcomes: baseOutcomes2 } = latestRun;
       if (makeComment) {
         (0, import_core.startGroup)("Creating comment");
         const commentBody = generatePreviewComment({
-          outcomes,
-          baseOutcomes,
+          outcomes: outcomes2,
+          baseOutcomes: baseOutcomes2,
           orgName,
           projectName
         });
         await upsertComment({ body: commentBody, token: githubToken });
         (0, import_core.endGroup)();
       }
-      if (!checkResults({ outcomes, failRunOn })) {
-        process.exit(1);
-      }
+    }
+    const { outcomes, baseOutcomes } = latestRun;
+    (0, import_core.setOutput)("outcomes", outcomes);
+    (0, import_core.setOutput)("base_outcomes", baseOutcomes);
+    (0, import_core.endGroup)();
+    if (!checkResults({ outcomes, failRunOn })) {
+      process.exit(1);
     }
   } catch (error) {
     console.error("Error in preview action:", error);
