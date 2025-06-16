@@ -167,9 +167,9 @@ export async function *runBuilds({
   });
 
   for (const waitFor of ['postgen', 'completed'] as const) {
-    // wait for the postgen step then yield
+    // yield once when the head is in postgen and again once it's completed
     const results = await Promise.all([
-      pollBuild({ stainless, build: base, waitFor }),
+      pollBuild({ stainless, build: base, waitFor: 'postgen' }),
       pollBuild({ stainless, build: head, waitFor }),
     ]);
 
@@ -227,13 +227,13 @@ async function pollBuild({
     const build = await stainless.builds.retrieve(buildId);
     for (const language of languages) {
       if (!(language in outcomes)) {
-        const buildOutput = build.targets[language];
+        const buildOutput = build.targets[language]!;
 
         console.log(
-          `[${buildId}] Build for ${language} has status ${buildOutput?.commit.status}`,
+          `[${buildId}] Build for ${language} has status ${buildOutput.status}`,
         );
 
-        if (buildOutput && [waitFor, 'completed'].includes(buildOutput.status) && buildOutput.commit.status === "completed") {
+        if ([waitFor, 'completed'].includes(buildOutput.status) && buildOutput.commit.status === "completed") {
           console.log(
             `[${buildId}] Build has output:`,
             JSON.stringify(buildOutput),

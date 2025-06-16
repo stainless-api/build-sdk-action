@@ -61,7 +61,7 @@ export function generatePreviewComment({
     const studioLink = studioUrl ? `[Studio](${studioUrl})` : "";
     const compareLink = compareUrl ? `[Diff](${compareUrl})` : "";
     let ci;
-    const steps = ['lint', 'test', 'upload', 'build'] as const
+    const steps = ['lint', 'test'] as const
     if (steps.some(
       (key) => outcome[key] && outcome[key].status !== "completed",
     )) {

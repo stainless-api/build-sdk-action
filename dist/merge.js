@@ -25664,7 +25664,7 @@ async function* runBuilds({
   });
   for (const waitFor of ["postgen", "completed"]) {
     const results = await Promise.all([
-      pollBuild({ stainless, build: base, waitFor }),
+      pollBuild({ stainless, build: base, waitFor: "postgen" }),
       pollBuild({ stainless, build: head, waitFor })
     ]);
     let documentedSpecPath = null;
@@ -25707,9 +25707,9 @@ async function pollBuild({
       if (!(language in outcomes)) {
         const buildOutput = build2.targets[language];
         console.log(
-          `[${buildId}] Build for ${language} has status ${buildOutput?.commit.status}`
+          `[${buildId}] Build for ${language} has status ${buildOutput.status}`
         );
-        if (buildOutput && [waitFor, "completed"].includes(buildOutput.status) && buildOutput.commit.status === "completed") {
+        if ([waitFor, "completed"].includes(buildOutput.status) && buildOutput.commit.status === "completed") {
           console.log(
             `[${buildId}] Build has output:`,
             JSON.stringify(buildOutput)
