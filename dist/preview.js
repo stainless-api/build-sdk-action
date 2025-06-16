@@ -25990,18 +25990,18 @@ async function main() {
       const run = await generator.next();
       (0, import_core.endGroup)();
       if (run.done) {
-        const { outcomes: outcomes2, baseOutcomes: baseOutcomes2 } = latestRun;
-        (0, import_core.setOutput)("outcomes", outcomes2);
-        (0, import_core.setOutput)("base_outcomes", baseOutcomes2);
-        if (!checkResults({ outcomes: outcomes2, failRunOn })) {
+        const { outcomes, baseOutcomes } = latestRun;
+        (0, import_core.setOutput)("outcomes", outcomes);
+        (0, import_core.setOutput)("base_outcomes", baseOutcomes);
+        if (!checkResults({ outcomes, failRunOn })) {
           process.exit(1);
         }
         break;
       }
       latestRun = run.value;
-      const { outcomes, baseOutcomes } = latestRun;
       if (makeComment) {
-        (0, import_core.startGroup)("Creating comment");
+        const { outcomes, baseOutcomes } = latestRun;
+        (0, import_core.startGroup)("Updating comment");
         const commentBody = generatePreviewComment({
           outcomes,
           baseOutcomes,

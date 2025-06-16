@@ -107,10 +107,10 @@ async function main() {
 
       latestRun = run.value;
 
-      const {outcomes, baseOutcomes} = latestRun;
-
       if (makeComment) {
-        startGroup("Creating comment");
+        const {outcomes, baseOutcomes} = latestRun;
+
+        startGroup("Updating comment");
 
         const commentBody = generatePreviewComment({
           outcomes,

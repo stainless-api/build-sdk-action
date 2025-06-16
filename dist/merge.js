@@ -25885,8 +25885,7 @@ async function main() {
       console.log("No config files changed, skipping merge");
       return;
     }
-    (0, import_core.startGroup)("Running builds");
-    for await (const { outcomes, documentedSpecPath } of runBuilds({
+    const generator = runBuilds({
       stainless,
       projectName,
       commitMessage,
@@ -25895,12 +25894,25 @@ async function main() {
       mergeBranch,
       guessConfig: false,
       outputDir
-    })) {
-      (0, import_core.setOutput)("outcomes", outcomes);
-      (0, import_core.setOutput)("documented_spec_path", documentedSpecPath);
+    });
+    let latestRun;
+    while (true) {
+      (0, import_core.startGroup)("Running builds");
+      const run = await generator.next();
       (0, import_core.endGroup)();
+      if (run.done) {
+        const { outcomes, documentedSpecPath } = latestRun;
+        (0, import_core.setOutput)("outcomes", outcomes);
+        (0, import_core.setOutput)("documented_spec_path", documentedSpecPath);
+        if (!checkResults({ outcomes, failRunOn })) {
+          process.exit(1);
+        }
+        break;
+      }
+      latestRun = run.value;
       if (makeComment) {
-        (0, import_core.startGroup)("Creating comment");
+        const { outcomes } = latestRun;
+        (0, import_core.startGroup)("Updating comment");
         const commentBody = generateMergeComment({
           outcomes,
           orgName,
@@ -25908,19 +25920,6 @@ async function main() {
         });
         await upsertComment({ body: commentBody, token: githubToken });
         (0, import_core.endGroup)();
-        if (makeComment) {
-          (0, import_core.startGroup)("Creating comment");
-          const commentBody2 = generateMergeComment({
-            outcomes,
-            orgName,
-            projectName
-          });
-          await upsertComment({ body: commentBody2, token: githubToken });
-          (0, import_core.endGroup)();
-        }
-        if (!checkResults({ outcomes, failRunOn })) {
-          process.exit(1);
-        }
       }
     }
   } catch (error) {

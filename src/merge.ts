@@ -52,9 +52,7 @@ async function main() {
       return;
     }
 
-    startGroup("Running builds");
-
-    for await (const { outcomes, documentedSpecPath } of runBuilds({
+    const generator = runBuilds({
       stainless,
       projectName,
       commitMessage,
@@ -63,14 +61,36 @@ async function main() {
       mergeBranch,
       guessConfig: false,
       outputDir,
-    })) {
-      setOutput("outcomes", outcomes);
-      setOutput("documented_spec_path", documentedSpecPath);
+    })
+
+  let latestRun;
+
+   while (true) {
+      startGroup("Running builds");
+
+      const run = await generator.next();
 
       endGroup();
 
+      if (run.done) {
+        const { outcomes, documentedSpecPath } = latestRun!;
+
+        setOutput("outcomes", outcomes);
+        setOutput("documented_spec_path", documentedSpecPath);
+
+        if (!checkResults({ outcomes, failRunOn })) {
+          process.exit(1);
+        }
+
+        break;
+      }
+
+      latestRun = run.value;
+
       if (makeComment) {
-        startGroup("Creating comment");
+        const { outcomes } = latestRun;
+
+        startGroup("Updating comment");
 
         const commentBody = generateMergeComment({
           outcomes,
@@ -81,24 +101,6 @@ async function main() {
         await upsertComment({ body: commentBody, token: githubToken });
 
         endGroup();
-
-        if (makeComment) {
-          startGroup("Creating comment");
-
-          const commentBody = generateMergeComment({
-            outcomes,
-            orgName,
-            projectName,
-          });
-
-          await upsertComment({ body: commentBody, token: githubToken });
-
-          endGroup();
-        }
-
-        if (!checkResults({ outcomes, failRunOn })) {
-          process.exit(1);
-        }
       }
     }
   } catch (error) {
