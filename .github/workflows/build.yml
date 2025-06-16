@@ -17,7 +17,7 @@ jobs:
         run: npm run build
       - name: Commit build changes
         id: current_sha
-        if: ${{ github.ref == 'refs/heads/main' }}
+        # if: ${{ github.ref == 'refs/heads/main' }}
         run: |
           git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
@@ -29,16 +29,14 @@ jobs:
           fi
           echo "current_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
       - name: Update sample workflows and push
-        if: ${{ github.ref == 'refs/heads/main' }}
+        # if: ${{ github.ref == 'refs/heads/main' }}
         run: |
           sed -i -r -e \
             's/stainless-api\/build-sdk-action(\/?[^@]*)@.*/stainless-api\/build-sdk-action\1@${{ steps.current_sha.outputs.current_sha }}/g' \
+            README.md \
             examples/*.yml
-          git add examples
-          sed -i -r -e \
-            's/stainless-api\/build-sdk-action(\/?[^@]*)@.*/stainless-api\/build-sdk-action\1@${{ steps.current_sha.outputs.current_sha }}/g' \
-            README.md
           git add README.md
+          git add examples
           if git diff --cached --quiet HEAD; then
             echo "No changes to commit."
           else
