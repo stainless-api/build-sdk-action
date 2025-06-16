@@ -25564,18 +25564,21 @@ async function* runBuilds({
       commit_message: commitMessage,
       allow_empty: true
     });
-    const { outcomes, documentedSpec } = await pollBuild({ stainless, build, waitFor: "postgen" });
-    let documentedSpecPath = null;
-    if (outputDir && documentedSpec) {
-      documentedSpecPath = `${outputDir}/openapi.documented.yml`;
-      fs.mkdirSync(outputDir, { recursive: true });
-      fs.writeFileSync(documentedSpecPath, documentedSpec);
+    for (const waitFor of ["postgen", "completed"]) {
+      const { outcomes, documentedSpec } = await pollBuild({ stainless, build, waitFor });
+      let documentedSpecPath = null;
+      if (outputDir && documentedSpec) {
+        documentedSpecPath = `${outputDir}/openapi.documented.yml`;
+        fs.mkdirSync(outputDir, { recursive: true });
+        fs.writeFileSync(documentedSpecPath, documentedSpec);
+      }
+      yield {
+        baseOutcomes: null,
+        outcomes,
+        documentedSpecPath
+      };
     }
-    return {
-      baseOutcomes: null,
-      outcomes,
-      documentedSpecPath
-    };
+    return;
   }
   if (!configContent) {
     if (guessConfig) {
@@ -25671,10 +25674,13 @@ async function pollBuild({
     for (const language of languages) {
       if (!(language in outcomes)) {
         const buildOutput = build2.targets[language];
-        if (buildOutput?.status === waitFor && buildOutput.commit.status === "completed") {
-          const outcome = buildOutput?.commit;
+        console.log(
+          `[${buildId}] Build for ${language} has status ${buildOutput?.commit.status}`
+        );
+        if (buildOutput && [waitFor, "completed"].includes(buildOutput.status) && buildOutput.commit.status === "completed") {
+          const outcome = buildOutput.commit;
           console.log(
-            `[${buildId}] Build completed for ${language} with outcome:`,
+            `[${buildId}] Build has outcome:`,
             JSON.stringify(outcome)
           );
           outcomes[language] = { ...buildOutput, commit: buildOutput.commit };
