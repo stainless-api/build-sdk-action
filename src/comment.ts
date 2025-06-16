@@ -88,42 +88,7 @@ export function generatePreviewComment({
     })
     .join("");
 
-  const npmCommit = (outcomes["typescript"] ?? outcomes["node"])?.commit.completed.commit;
-  const npmPkgInstallCommand = npmCommit ?
-    `# ${outcomes["typescript"] ? "typescript" : "node"}
-npm install "https://pkg.stainless.com/s/${npmCommit.repo.name}/${npmCommit.sha}"`
-    : "";
-    const npmGitHubInstallCommand = npmCommit
-  ? `# ${outcomes["typescript"] ? "typescript" : "node"}
-npm install "https://github.com/${npmCommit.repo.owner}/${npmCommit.repo.name}.git#${npmCommit.repo.branch}"`
-  : "";
-
-  const pythonCommit = outcomes["python"]?.commit.completed.commit;
-  const pythonPkgInstallCommand = pythonCommit
-    ? `# python
-pip install https://pkg.stainless.com/s/${pythonCommit.repo.name}/${pythonCommit.sha}`
-    : "";
-  const pythonGitHubInstallCommand = pythonCommit
-  ? `# python
-pip install git+https://github.com/${pythonCommit.repo.owner}/${pythonCommit.repo.name}.git@${pythonCommit.repo.branch}`
-  : "";
-
-  const npmBuild = (outcomes["typescript"] ?? outcomes["node"]).build;
-  const npmInstallCommand = npmBuild?.status === "completed" && npmBuild.completed.conclusion === "success" ? npmPkgInstallCommand : npmGitHubInstallCommand;
-
-  const pythonUpload = outcomes["python"]?.upload;
-  const pythonInstallCommand = pythonUpload?.status === "completed" && pythonUpload.completed.conclusion === "success"
-    ? pythonPkgInstallCommand
-    : pythonGitHubInstallCommand;
-
-  const installation =
-    npmInstallCommand || pythonInstallCommand
-      ? `#### :package: Installation
-${[npmInstallCommand, pythonInstallCommand]
-  .filter(Boolean)
-  .map((cmd) => `\`\`\`bash\n${cmd}\n\`\`\``)
-  .join("\n")}`
-      : "";
+  const installation = getInstallationInstructions({ outcomes });
 
   return `
 ### :sparkles: SDK Previews
@@ -138,6 +103,68 @@ ${header}${tableRows}
 
 You can freely modify the branches to add [custom code](https://app.stainlessapi.com/docs/guides/patch-custom-code).${installation ? `\n${installation}` : ""}
     `;
+}
+
+function getInstallationInstructions({
+  outcomes,
+}: {
+  outcomes: Outcomes;
+}) {
+    const npmCommit = (outcomes["typescript"] ?? outcomes["node"])?.commit.completed.commit;
+  const npmPkgInstallCommand = npmCommit ?
+    `# ${outcomes["typescript"] ? "typescript" : "node"}
+npm install "${getPkgStainlessURL({repo: npmCommit.repo, sha: npmCommit.sha})}"`
+    : "";
+    const npmGitHubInstallCommand = npmCommit
+  ? `# ${outcomes["typescript"] ? "typescript" : "node"}
+npm install "${getGitHubURL({repo: npmCommit.repo})}"`
+  : "";
+
+  const pythonCommit = outcomes["python"]?.commit.completed.commit;
+  const pythonPkgInstallCommand = pythonCommit
+    ? `# python
+pip install ${getPkgStainlessURL({repo: pythonCommit.repo, sha: pythonCommit.sha})}`
+    : "";
+  const pythonGitHubInstallCommand = pythonCommit
+  ? `# python
+pip install git+${getGitHubURL({repo: pythonCommit.repo})}`
+  : "";
+
+  // we should not show pkg.stainless.com install instructions until the SDK is built (and uploaded)
+  const npmBuild = (outcomes["typescript"] ?? outcomes["node"]).build;
+  const npmInstallCommand = npmBuild?.status === "completed" && npmBuild.completed.conclusion === "success" ? npmPkgInstallCommand : npmGitHubInstallCommand;
+
+  // similarly, we should not show pkg.stainless.com install instructions for python until the SDK is uploaded
+  const pythonUpload = outcomes["python"]?.upload;
+  const pythonInstallCommand = pythonUpload?.status === "completed" && pythonUpload.completed.conclusion === "success"
+    ? pythonPkgInstallCommand
+    : pythonGitHubInstallCommand;
+
+  return npmInstallCommand || pythonInstallCommand
+      ? `#### :package: Installation
+${[npmInstallCommand, pythonInstallCommand]
+  .filter(Boolean)
+  .map((cmd) => `\`\`\`bash\n${cmd}\n\`\`\``)
+  .join("\n")}`
+      : "";
+}
+
+function getGitHubURL({
+  repo,
+}: {
+  repo: { owner: string; name: string; branch: string };
+}) {
+  return `https://github.com/${repo.owner}/${repo.name}.git#${repo.branch}`
+}
+
+function getPkgStainlessURL({
+  repo,
+  sha,
+}: {
+  repo: { name: string };
+  sha: string;
+}) {
+  return `https://pkg.stainless.com/s/${repo.name}/${sha}`;
 }
 
 export function generateMergeComment({
