@@ -1,10 +1,12 @@
 import * as fs from "fs";
-import { StainlessV0 as Stainless } from "stainless";
+import { Stainless } from "stainless";
 
 type Build = Stainless.Builds.BuildObject;
 export type Outcomes = Record<
   string,
-  Stainless.Builds.BuildTarget.Completed.Completed
+  Exclude<Stainless.Builds.BuildTarget, 'commit'> & {
+    commit: Stainless.Builds.BuildTarget.Completed | null;
+  }
 >;
 
 // https://www.conventionalcommits.org/en/v1.0.0/
@@ -19,7 +21,7 @@ const isValidConventionalCommitMessage = (message: string) => {
 const POLLING_INTERVAL_SECONDS = 5;
 const MAX_POLLING_SECONDS = 10 * 60; // 10 minutes
 
-export async function runBuilds({
+export async function *runBuilds({
   stainless,
   projectName,
   baseRevision,
@@ -91,27 +93,31 @@ export async function runBuilds({
       allow_empty: true,
     });
 
-    const { outcomes, documentedSpec } = await pollBuild({ stainless, build });
+    for (const waitFor of ['postgen', 'completed'] as const) {
+      const { outcomes, documentedSpec } = await pollBuild({ stainless, build, waitFor });
 
-    let documentedSpecPath = null;
-    if (outputDir && documentedSpec) {
-      documentedSpecPath = `${outputDir}/openapi.documented.yml`;
-      fs.mkdirSync(outputDir, { recursive: true });
-      fs.writeFileSync(documentedSpecPath, documentedSpec);
+      let documentedSpecPath = null;
+      if (outputDir && documentedSpec) {
+        documentedSpecPath = `${outputDir}/openapi.documented.yml`;
+        fs.mkdirSync(outputDir, { recursive: true });
+        fs.writeFileSync(documentedSpecPath, documentedSpec);
+      }
+
+      yield {
+        baseOutcomes: null,
+        outcomes,
+        documentedSpecPath,
+      };
     }
-
-    return {
-      baseOutcomes: null,
-      outcomes,
-      documentedSpecPath,
-    };
+    
+    return;
   }
 
   if (!configContent) {
     if (guessConfig) {
       console.log("Guessing config before branch reset");
       configContent = Object.values(
-        await stainless.projects.configs.guess(projectName, {
+        await stainless.projects.configs.guess({
           branch,
           spec: oasContent!,
         }),
@@ -119,7 +125,7 @@ export async function runBuilds({
     } else {
       console.log("Saving config before branch reset");
       configContent = Object.values(
-        await stainless.projects.configs.retrieve(projectName, {
+        await stainless.projects.configs.retrieve({
           branch,
         }),
       )[0]?.content;
@@ -128,7 +134,6 @@ export async function runBuilds({
 
   console.log(`Hard resetting ${branch} to ${baseRevision}`);
   const { config_commit } = await stainless.projects.branches.create(
-    projectName,
     {
       branch_from: baseRevision,
       branch: branch!,
@@ -138,7 +143,6 @@ export async function runBuilds({
   console.log(`Hard reset ${branch}, now at ${config_commit.sha}`);
 
   const { base, head } = await stainless.builds.compare({
-    project: projectName,
     base: {
       revision: baseRevision,
       branch: baseBranch,
@@ -162,33 +166,40 @@ export async function runBuilds({
     },
   });
 
-  const results = await Promise.all([
-    pollBuild({ stainless, build: base }),
-    pollBuild({ stainless, build: head }),
-  ]);
+  for (const waitFor of ['postgen', 'completed'] as const) {
+    // yield once when the head is in postgen and again once it's completed
+    const results = await Promise.all([
+      pollBuild({ stainless, build: base, waitFor: 'postgen' }),
+      pollBuild({ stainless, build: head, waitFor }),
+    ]);
 
-  let documentedSpecPath = null;
-  if (outputDir && results[1].documentedSpec) {
-    documentedSpecPath = `${outputDir}/openapi.documented.yml`;
-    fs.mkdirSync(outputDir, { recursive: true });
-    fs.writeFileSync(documentedSpecPath, results[1].documentedSpec);
+    let documentedSpecPath = null;
+    if (outputDir && results[1].documentedSpec) {
+      documentedSpecPath = `${outputDir}/openapi.documented.yml`;
+      fs.mkdirSync(outputDir, { recursive: true });
+      fs.writeFileSync(documentedSpecPath, results[1].documentedSpec);
+    }
+
+    yield {
+      baseOutcomes: results[0].outcomes,
+      outcomes: results[1].outcomes,
+      documentedSpecPath,
+    };
   }
 
-  return {
-    baseOutcomes: results[0].outcomes,
-    outcomes: results[1].outcomes,
-    documentedSpecPath,
-  };
+  return;
 }
 
 async function pollBuild({
   stainless,
   build,
+  waitFor,
   pollingIntervalSeconds = POLLING_INTERVAL_SECONDS,
   maxPollingSeconds = MAX_POLLING_SECONDS,
 }: {
   stainless: Stainless;
   build: Build;
+  waitFor: 'postgen' | 'completed';
   pollingIntervalSeconds?: number;
   maxPollingSeconds?: number;
 }) {
@@ -216,18 +227,18 @@ async function pollBuild({
     const build = await stainless.builds.retrieve(buildId);
     for (const language of languages) {
       if (!(language in outcomes)) {
-        const buildOutput = build.targets[language];
-        if (buildOutput?.commit.status === "completed") {
-          const outcome = buildOutput?.commit;
+        const buildOutput = build.targets[language]!;
+
+        console.log(
+          `[${buildId}] Build for ${language} has status ${buildOutput.status}`,
+        );
+
+        if ([waitFor, 'completed'].includes(buildOutput.status) && buildOutput.commit.status === "completed") {
           console.log(
-            `[${buildId}] Build completed for ${language} with outcome:`,
-            JSON.stringify(outcome),
+            `[${buildId}] Build has output:`,
+            JSON.stringify(buildOutput),
           );
-          outcomes[language] = outcome.completed;
-        } else {
-          console.log(
-            `[${buildId}] Build for ${language} has status ${buildOutput?.commit.status}`,
-          );
+          outcomes[language] = {...buildOutput, commit: buildOutput.commit};
         }
       }
     }
@@ -251,9 +262,22 @@ async function pollBuild({
       `[${buildId}] Build for ${language} timed out after ${maxPollingSeconds} seconds`,
     );
     outcomes[language] = {
-      conclusion: "timed_out",
-      commit: null,
-      merge_conflict_pr: null,
+      object: "build_target",
+      status: "completed",
+      lint: {
+        status: "not_started",
+      },
+      test: {
+        status: "not_started",
+      },
+      commit: {
+        status: "completed",
+          completed: {
+          conclusion: "timed_out",
+          commit: null,
+          merge_conflict_pr: null,
+        }
+      }
     };
   }
 
@@ -278,13 +302,13 @@ export function checkResults({
       failRunOn === "warning" ||
       failRunOn === "note"
     ) {
-      if (outcome.conclusion === "error") return true;
+      if (outcome.commit.completed.conclusion === "error") return true;
     }
     if (failRunOn === "warning" || failRunOn === "note") {
-      if (outcome.conclusion === "warning") return true;
+      if (outcome.commit.completed.conclusion === "warning") return true;
     }
     if (failRunOn === "note") {
-      if (outcome.conclusion === "note") return true;
+      if (outcome.commit.completed.conclusion === "note") return true;
     }
     return false;
   });

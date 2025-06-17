@@ -1,5 +1,6 @@
 import * as github from "@actions/github";
 import { Outcomes } from "./build";
+import { BuildTarget } from "stainless/resources/index";
 
 export function generatePreviewComment({
   outcomes,
@@ -22,48 +23,53 @@ export function generatePreviewComment({
     let compareUrl;
     let notes = "";
 
-    if (outcome.commit) {
-      const { owner, name, branch } = outcome.commit.repo;
+    const baseCompletedCommit = baseOutcome?.commit.completed;
+    const completedCommit = outcome.commit.completed;
+
+    if (completedCommit.commit) {
+      const { owner, name, branch } = completedCommit.commit.repo;
       githubUrl = `https://github.com/${owner}/${name}/tree/${branch}`;
 
-      if (baseOutcome?.commit) {
-        const base = baseOutcome.commit.repo.branch;
+      if (baseCompletedCommit?.commit) {
+        const base = baseCompletedCommit.commit.repo.branch;
         const head = branch;
         compareUrl = `https://github.com/${owner}/${name}/compare/${base}..${head}`;
       } else {
         if (baseOutcome) {
-          notes = `Could not generate a diff link because the base build had conclusion: ${baseOutcome?.conclusion}`;
+          notes = `Could not generate a diff link because the base build had conclusion: ${baseCompletedCommit?.conclusion}`;
         } else {
           notes = `Could not generate a diff link because a base build was not found`;
         }
       }
-    } else if (outcome.merge_conflict_pr) {
+    } else if (completedCommit.merge_conflict_pr) {
       const {
         number,
         repo: { owner, name },
-      } = outcome.merge_conflict_pr;
+      } = completedCommit.merge_conflict_pr;
       const mergeConflictUrl = `https://github.com/${owner}/${name}/pull/${number}`;
       const runUrl = `https://github.com/${github.context.payload.repository?.full_name}/actions/runs/${github.context.runId}`;
-      if (outcome.conclusion === "upstream_merge_conflict") {
+      if (completedCommit.conclusion === "upstream_merge_conflict") {
         notes = `A preview could not be generated because there is a conflict on the parent branch. Please resolve the [conflict](${mergeConflictUrl}) then re-run the [workflow](${runUrl}).`;
       } else {
         notes = `The build resulted in a merge conflict. Please resolve the [conflict](${mergeConflictUrl}) then re-run the [workflow](${runUrl}).`;
       }
     } else {
-      notes = `Could not generate a branch or diff link because the build had conclusion: ${outcome.conclusion}`;
+      notes = `Could not generate a branch or diff link because the build had conclusion: ${completedCommit.conclusion}`;
     }
 
     const githubLink = githubUrl ? `[Branch](${githubUrl})` : "";
     const studioLink = studioUrl ? `[Studio](${studioUrl})` : "";
     const compareLink = compareUrl ? `[Diff](${compareUrl})` : "";
+    const lint = outcome.lint?.status === "completed" ? outcome.lint.completed.conclusion : "pending";
+    const test = outcome.test?.status === "completed" ? outcome.test.completed.conclusion : "pending";
 
     return `
-| ${lang} | ${outcome.conclusion} | ${githubLink} | ${studioLink} | ${compareLink} | ${notes} |`;
+| ${lang} | ${completedCommit.conclusion} | ${lint} | ${test} | ${githubLink} | ${studioLink} | ${compareLink} | ${notes} |`;
   };
 
   const header = `
-| Language | Conclusion | Branch | Studio | Diff | Notes |
-|----------|------------|--------|--------|------|-------|`;
+| Language | Conclusion | Lint | Test | Branch | Studio | Diff | Notes |
+|----------|------------|------|------|--------|--------|------|-------|`;
 
   const tableRows = Object.keys(outcomes)
     .map((lang) => {
@@ -71,26 +77,7 @@ export function generatePreviewComment({
     })
     .join("");
 
-  const npmRepo = (outcomes["typescript"] ?? outcomes["node"])?.commit?.repo;
-  const npmInstallCommand = npmRepo
-    ? `# ${outcomes["typescript"] ? "typescript" : "node"}
-npm install "https://github.com/${npmRepo.owner}/${npmRepo.name}.git#${npmRepo.branch}"`
-    : "";
-
-  const pythonRepo = outcomes["python"]?.commit?.repo;
-  const pythonInstallCommand = pythonRepo
-    ? `# python
-pip install git+https://github.com/${pythonRepo.owner}/${pythonRepo.name}.git@${pythonRepo.branch}`
-    : "";
-
-  const installation =
-    npmInstallCommand || pythonInstallCommand
-      ? `#### :package: Installation
-${[npmInstallCommand, pythonInstallCommand]
-  .filter(Boolean)
-  .map((cmd) => `\`\`\`bash\n${cmd}\n\`\`\``)
-  .join("\n")}`
-      : "";
+  const installation = getInstallationInstructions({ outcomes });
 
   return `
 ### :sparkles: SDK Previews
@@ -105,6 +92,68 @@ ${header}${tableRows}
 
 You can freely modify the branches to add [custom code](https://app.stainlessapi.com/docs/guides/patch-custom-code).${installation ? `\n${installation}` : ""}
     `;
+}
+
+function getInstallationInstructions({
+  outcomes,
+}: {
+  outcomes: Outcomes;
+}) {
+    const npmCommit = (outcomes["typescript"] ?? outcomes["node"])?.commit.completed.commit;
+  const npmPkgInstallCommand = npmCommit ?
+    `# ${outcomes["typescript"] ? "typescript" : "node"}
+npm install "${getPkgStainlessURL({repo: npmCommit.repo, sha: npmCommit.sha})}"`
+    : "";
+    const npmGitHubInstallCommand = npmCommit
+  ? `# ${outcomes["typescript"] ? "typescript" : "node"}
+npm install "${getGitHubURL({repo: npmCommit.repo})}"`
+  : "";
+
+  const pythonCommit = outcomes["python"]?.commit.completed.commit;
+  const pythonPkgInstallCommand = pythonCommit
+    ? `# python
+pip install ${getPkgStainlessURL({repo: pythonCommit.repo, sha: pythonCommit.sha})}`
+    : "";
+  const pythonGitHubInstallCommand = pythonCommit
+  ? `# python
+pip install git+${getGitHubURL({repo: pythonCommit.repo})}`
+  : "";
+
+  // we should not show pkg.stainless.com install instructions until the SDK is built (and uploaded)
+  const npmBuild = (outcomes["typescript"] ?? outcomes["node"]).build;
+  const npmInstallCommand = npmBuild?.status === "completed" && npmBuild.completed.conclusion === "success" ? npmPkgInstallCommand : npmGitHubInstallCommand;
+
+  // similarly, we should not show pkg.stainless.com install instructions for python until the SDK is uploaded
+  const pythonUpload = outcomes["python"]?.upload;
+  const pythonInstallCommand = pythonUpload?.status === "completed" && pythonUpload.completed.conclusion === "success"
+    ? pythonPkgInstallCommand
+    : pythonGitHubInstallCommand;
+
+  return npmInstallCommand || pythonInstallCommand
+      ? `#### :package: Installation
+${[npmInstallCommand, pythonInstallCommand]
+  .filter(Boolean)
+  .map((cmd) => `\`\`\`bash\n${cmd}\n\`\`\``)
+  .join("\n")}`
+      : "";
+}
+
+function getGitHubURL({
+  repo,
+}: {
+  repo: { owner: string; name: string; branch: string };
+}) {
+  return `https://github.com/${repo.owner}/${repo.name}.git#${repo.branch}`
+}
+
+function getPkgStainlessURL({
+  repo,
+  sha,
+}: {
+  repo: { name: string };
+  sha: string;
+}) {
+  return `https://pkg.stainless.com/s/${repo.name}/${sha}`;
 }
 
 export function generateMergeComment({
@@ -129,7 +178,7 @@ export function generateMergeComment({
     const studioLink = studioUrl ? `[Studio](${studioUrl})` : "";
 
     return `
-| ${lang} | ${outcome.conclusion} | ${studioLink} |`;
+| ${lang} | ${outcome.commit.completed.conclusion} | ${studioLink} |`;
   };
 
   const header = `
@@ -172,16 +221,16 @@ export async function upsertComment({
   });
 
   const firstLine = body.trim().split("\n")[0];
-  const previewComment = comments.find((comment) =>
+  const existingComment = comments.find((comment) =>
     comment.body?.includes(firstLine),
   );
 
-  if (previewComment) {
-    console.log("Updating existing comment:", previewComment.id);
+  if (existingComment) {
+    console.log("Updating existing comment:", existingComment.id);
     await octokit.rest.issues.updateComment({
       owner: github.context.repo.owner,
       repo: github.context.repo.repo,
-      comment_id: previewComment.id,
+      comment_id: existingComment.id,
       body,
     });
   } else {
