@@ -34,6 +34,7 @@ inputs:
       If true, update the existing Stainless config file based on the OpenAPI
       spec. Cannot be specified if `config_path` is specified.
     required: false
+    default: false
   branch:
     description: Stainless branch to create the build on.
     required: false
