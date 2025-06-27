@@ -7,8 +7,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node
-        uses: actions/setup-node@v4
+        with:
+          # use a token so we trigger release-please if needed
+          token: ${{ secrets.BOT_GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Install dependencies
@@ -16,7 +18,6 @@ jobs:
       - name: Build TypeScript
         run: npm run build
       - name: Commit build changes
-        id: current_sha
         if: ${{ github.ref == 'refs/heads/main' }}
         run: |
           git config --local user.name "github-actions[bot]"
@@ -25,21 +26,6 @@ jobs:
           if git diff --cached --quiet HEAD; then
             echo "No changes to commit."
           else
-            git commit -m "chore(build): Update dist [skip ci]"
+            git commit -m "chore(build): Update dist"
+            git push
           fi
-          echo "current_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
-      - name: Update sample workflows and push
-        if: ${{ github.ref == 'refs/heads/main' }}
-        run: |
-          sed -i -r -e \
-            's/stainless-api\/build-sdk-action(\/?[^@]*)@.*/stainless-api\/build-sdk-action\1@${{ steps.current_sha.outputs.current_sha }}/g' \
-            README.md \
-            examples/*.yml
-          git add README.md
-          git add examples
-          if git diff --cached --quiet HEAD; then
-            echo "No changes to commit."
-          else
-            git commit -m "chore(build): Update sample workflow [skip ci]"
-          fi
-          git push
