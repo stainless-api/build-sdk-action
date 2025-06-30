@@ -25800,11 +25800,23 @@ async function isConfigChanged({
 // src/comment.ts
 var github = __toESM(require_github());
 function generatePreviewComment({
+  noChanges,
   outcomes,
   baseOutcomes,
   orgName,
   projectName
 }) {
+  const makeHeader = () => `
+### :sparkles: SDK Previews
+_Last updated: ${(/* @__PURE__ */ new Date()).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC")}_
+`;
+  if (noChanges) {
+    return `
+${makeHeader()}
+
+No changes were made to the SDKs.
+`;
+  }
   const generateRow = (lang, outcome, baseOutcome) => {
     const studioUrl = `https://app.stainless.com/${orgName}/${projectName}/studio?language=${lang}&branch=preview/${github.context.payload.pull_request.head.ref}`;
     let githubUrl;
@@ -25849,7 +25861,7 @@ function generatePreviewComment({
     return `
 | ${lang} | ${completedCommit.conclusion} | ${lint} | ${test} | ${githubLink} | ${studioLink} | ${compareLink} | ${notes} |`;
   };
-  const header = `
+  const tableHeader = `
 | Language | Conclusion | Lint | Test | Branch | Studio | Diff | Notes |
 |----------|------------|------|------|--------|--------|------|-------|`;
   const tableRows = Object.keys(outcomes).map((lang) => {
@@ -25857,20 +25869,15 @@ function generatePreviewComment({
   }).join("");
   const installation = getInstallationInstructions({ outcomes });
   return `
-### :sparkles: SDK Previews
-_Last updated: ${(/* @__PURE__ */ new Date()).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC")}_
+${makeHeader()}
 
-The following table summarizes the build outcomes for all languages:
-
-${header}${tableRows}
+${tableHeader}${tableRows}
 
 You can freely modify the branches to add [custom code](https://app.stainlessapi.com/docs/guides/patch-custom-code).${installation ? `
 ${installation}` : ""}
     `;
 }
-function getInstallationInstructions({
-  outcomes
-}) {
+function getInstallationInstructions({ outcomes }) {
   const npmCommit = (outcomes["typescript"] ?? outcomes["node"])?.commit.completed.commit;
   const npmPkgInstallCommand = npmCommit ? `# ${outcomes["typescript"] ? "typescript" : "node"}
 npm install "${getPkgStainlessURL({ repo: npmCommit.repo, sha: npmCommit.sha })}"` : "";
@@ -25903,7 +25910,8 @@ function getPkgStainlessURL({
 }
 async function upsertComment({
   body,
-  token
+  token,
+  skipCreate = false
 }) {
   const octokit = github.getOctokit(token);
   console.log(
@@ -25927,7 +25935,7 @@ async function upsertComment({
       comment_id: existingComment.id,
       body
     });
-  } else {
+  } else if (!skipCreate) {
     console.log("Creating new comment");
     await octokit.rest.issues.createComment({
       owner: github.context.repo.owner,
@@ -25959,7 +25967,11 @@ async function main() {
     if (makeComment && !githubToken) {
       throw new Error("github_token is required to make a comment");
     }
-    const stainless = new Stainless({ project: projectName, apiKey, logLevel: "warn" });
+    const stainless = new Stainless({
+      project: projectName,
+      apiKey,
+      logLevel: "warn"
+    });
     (0, import_core.startGroup)("Getting parent revision");
     const { mergeBaseSha, nonMainBaseRef } = await getParentCommits({
       baseSha,
@@ -25975,6 +25987,16 @@ async function main() {
     });
     if (!configChanged) {
       console.log("No config files changed, skipping preview");
+      if (makeComment) {
+        (0, import_core.startGroup)("Updating comment");
+        const commentBody = generatePreviewComment({ noChanges: true });
+        await upsertComment({
+          body: commentBody,
+          token: githubToken,
+          skipCreate: true
+        });
+        (0, import_core.endGroup)();
+      }
       return;
     }
     const baseRevision = await computeBaseRevision({

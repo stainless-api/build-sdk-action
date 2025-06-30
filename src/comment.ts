@@ -1,18 +1,43 @@
 import * as github from "@actions/github";
 import { Outcomes } from "./build";
-import { BuildTarget } from "stainless/resources/index";
 
 export function generatePreviewComment({
+  noChanges,
   outcomes,
   baseOutcomes,
   orgName,
   projectName,
-}: {
-  outcomes: Outcomes;
-  baseOutcomes?: Outcomes | null;
-  orgName: string;
-  projectName: string;
-}) {
+}:
+  | {
+      noChanges?: never;
+      outcomes: Outcomes;
+      baseOutcomes?: Outcomes | null;
+      orgName: string;
+      projectName: string;
+    }
+  | {
+      noChanges: true;
+      outcomes?: never;
+      baseOutcomes?: never;
+      orgName?: never;
+      projectName?: never;
+    }) {
+  const makeHeader = () => `
+### :sparkles: SDK Previews
+_Last updated: ${new Date()
+    .toISOString()
+    .replace("T", " ")
+    .replace(/\.\d+Z$/, " UTC")}_
+`;
+
+  if (noChanges) {
+    return `
+${makeHeader()}
+
+No changes were made to the SDKs.
+`;
+  }
+
   const generateRow = (
     lang: string,
     outcome: Outcomes[string],
@@ -60,14 +85,20 @@ export function generatePreviewComment({
     const githubLink = githubUrl ? `[Branch](${githubUrl})` : "";
     const studioLink = studioUrl ? `[Studio](${studioUrl})` : "";
     const compareLink = compareUrl ? `[Diff](${compareUrl})` : "";
-    const lint = outcome.lint?.status === "completed" ? outcome.lint.completed.conclusion : "pending";
-    const test = outcome.test?.status === "completed" ? outcome.test.completed.conclusion : "pending";
+    const lint =
+      outcome.lint?.status === "completed"
+        ? outcome.lint.completed.conclusion
+        : "pending";
+    const test =
+      outcome.test?.status === "completed"
+        ? outcome.test.completed.conclusion
+        : "pending";
 
     return `
 | ${lang} | ${completedCommit.conclusion} | ${lint} | ${test} | ${githubLink} | ${studioLink} | ${compareLink} | ${notes} |`;
   };
 
-  const header = `
+  const tableHeader = `
 | Language | Conclusion | Lint | Test | Branch | Studio | Diff | Notes |
 |----------|------------|------|------|--------|--------|------|-------|`;
 
@@ -80,62 +111,59 @@ export function generatePreviewComment({
   const installation = getInstallationInstructions({ outcomes });
 
   return `
-### :sparkles: SDK Previews
-_Last updated: ${new Date()
-    .toISOString()
-    .replace("T", " ")
-    .replace(/\.\d+Z$/, " UTC")}_
+${makeHeader()}
 
-The following table summarizes the build outcomes for all languages:
-
-${header}${tableRows}
+${tableHeader}${tableRows}
 
 You can freely modify the branches to add [custom code](https://app.stainlessapi.com/docs/guides/patch-custom-code).${installation ? `\n${installation}` : ""}
     `;
 }
 
-function getInstallationInstructions({
-  outcomes,
-}: {
-  outcomes: Outcomes;
-}) {
-    const npmCommit = (outcomes["typescript"] ?? outcomes["node"])?.commit.completed.commit;
-  const npmPkgInstallCommand = npmCommit ?
-    `# ${outcomes["typescript"] ? "typescript" : "node"}
-npm install "${getPkgStainlessURL({repo: npmCommit.repo, sha: npmCommit.sha})}"`
+function getInstallationInstructions({ outcomes }: { outcomes: Outcomes }) {
+  const npmCommit = (outcomes["typescript"] ?? outcomes["node"])?.commit
+    .completed.commit;
+  const npmPkgInstallCommand = npmCommit
+    ? `# ${outcomes["typescript"] ? "typescript" : "node"}
+npm install "${getPkgStainlessURL({ repo: npmCommit.repo, sha: npmCommit.sha })}"`
     : "";
-    const npmGitHubInstallCommand = npmCommit
-  ? `# ${outcomes["typescript"] ? "typescript" : "node"}
-npm install "${getGitHubURL({repo: npmCommit.repo})}"`
-  : "";
+  const npmGitHubInstallCommand = npmCommit
+    ? `# ${outcomes["typescript"] ? "typescript" : "node"}
+npm install "${getGitHubURL({ repo: npmCommit.repo })}"`
+    : "";
 
   const pythonCommit = outcomes["python"]?.commit.completed.commit;
   const pythonPkgInstallCommand = pythonCommit
     ? `# python
-pip install ${getPkgStainlessURL({repo: pythonCommit.repo, sha: pythonCommit.sha})}`
+pip install ${getPkgStainlessURL({ repo: pythonCommit.repo, sha: pythonCommit.sha })}`
     : "";
   const pythonGitHubInstallCommand = pythonCommit
-  ? `# python
-pip install git+${getGitHubURL({repo: pythonCommit.repo})}`
-  : "";
+    ? `# python
+pip install git+${getGitHubURL({ repo: pythonCommit.repo })}`
+    : "";
 
   // we should not show pkg.stainless.com install instructions until the SDK is built (and uploaded)
   const npmBuild = (outcomes["typescript"] ?? outcomes["node"]).build;
-  const npmInstallCommand = npmBuild?.status === "completed" && npmBuild.completed.conclusion === "success" ? npmPkgInstallCommand : npmGitHubInstallCommand;
+  const npmInstallCommand =
+    npmBuild?.status === "completed" &&
+    npmBuild.completed.conclusion === "success"
+      ? npmPkgInstallCommand
+      : npmGitHubInstallCommand;
 
   // similarly, we should not show pkg.stainless.com install instructions for python until the SDK is uploaded
   const pythonUpload = outcomes["python"]?.upload;
-  const pythonInstallCommand = pythonUpload?.status === "completed" && pythonUpload.completed.conclusion === "success"
-    ? pythonPkgInstallCommand
-    : pythonGitHubInstallCommand;
+  const pythonInstallCommand =
+    pythonUpload?.status === "completed" &&
+    pythonUpload.completed.conclusion === "success"
+      ? pythonPkgInstallCommand
+      : pythonGitHubInstallCommand;
 
   return npmInstallCommand || pythonInstallCommand
-      ? `#### :package: Installation
+    ? `#### :package: Installation
 ${[npmInstallCommand, pythonInstallCommand]
   .filter(Boolean)
   .map((cmd) => `\`\`\`bash\n${cmd}\n\`\`\``)
   .join("\n")}`
-      : "";
+    : "";
 }
 
 function getGitHubURL({
@@ -143,7 +171,7 @@ function getGitHubURL({
 }: {
   repo: { owner: string; name: string; branch: string };
 }) {
-  return `https://github.com/${repo.owner}/${repo.name}.git#${repo.branch}`
+  return `https://github.com/${repo.owner}/${repo.name}.git#${repo.branch}`;
 }
 
 function getPkgStainlessURL({
@@ -203,9 +231,11 @@ ${header}${tableRows}
 export async function upsertComment({
   body,
   token,
+  skipCreate = false,
 }: {
   body: string;
   token: string;
+  skipCreate?: boolean;
 }) {
   const octokit = github.getOctokit(token);
 
@@ -233,7 +263,7 @@ export async function upsertComment({
       comment_id: existingComment.id,
       body,
     });
-  } else {
+  } else if (!skipCreate) {
     console.log("Creating new comment");
     await octokit.rest.issues.createComment({
       owner: github.context.repo.owner,
