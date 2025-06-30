@@ -25597,7 +25597,11 @@ async function* runBuilds({
       allow_empty: true
     });
     for (const waitFor of ["postgen", "completed"]) {
-      const { outcomes, documentedSpec } = await pollBuild({ stainless, build, waitFor });
+      const { outcomes, documentedSpec } = await pollBuild({
+        stainless,
+        build,
+        waitFor
+      });
       let documentedSpecPath = null;
       if (outputDir && documentedSpec) {
         documentedSpecPath = `${outputDir}/openapi.documented.yml`;
@@ -25636,6 +25640,10 @@ async function* runBuilds({
       branch_from: baseRevision,
       branch,
       force: true
+    },
+    {
+      // For very large specs, writing the config files can take a while.
+      timeout: 3 * 60 * 1e3
     }
   );
   console.log(`Hard reset ${branch}, now at ${config_commit.sha}`);

@@ -4,7 +4,7 @@ import { Stainless } from "stainless";
 type Build = Stainless.Builds.BuildObject;
 export type Outcomes = Record<
   string,
-  Exclude<Stainless.Builds.BuildTarget, 'commit'> & {
+  Exclude<Stainless.Builds.BuildTarget, "commit"> & {
     commit: Stainless.Builds.BuildTarget.Completed | null;
   }
 >;
@@ -21,7 +21,7 @@ const isValidConventionalCommitMessage = (message: string) => {
 const POLLING_INTERVAL_SECONDS = 5;
 const MAX_POLLING_SECONDS = 10 * 60; // 10 minutes
 
-export async function *runBuilds({
+export async function* runBuilds({
   stainless,
   projectName,
   baseRevision,
@@ -72,29 +72,39 @@ export async function *runBuilds({
     : undefined;
 
   if (!baseRevision) {
-    const build = await stainless.builds.create({
-      project: projectName,
-      revision: mergeBranch
-        ? `${branch}..${mergeBranch}`
-        : {
-            ...(oasContent && {
-              "openapi.yml": {
-                content: oasContent,
-              },
-            }),
-            ...(configContent && {
-              "openapi.stainless.yml": {
-                content: configContent,
-              },
-            }),
-          },
-      branch,
-      commit_message: commitMessage,
-      allow_empty: true,
-    });
+    const build = await stainless.builds.create(
+      {
+        project: projectName,
+        revision: mergeBranch
+          ? `${branch}..${mergeBranch}`
+          : {
+              ...(oasContent && {
+                "openapi.yml": {
+                  content: oasContent,
+                },
+              }),
+              ...(configContent && {
+                "openapi.stainless.yml": {
+                  content: configContent,
+                },
+              }),
+            },
+        branch,
+        commit_message: commitMessage,
+        allow_empty: true,
+      },
+      {
+        // For very large specs, writing the config files can take a while.
+        timeout: 3 * 60 * 1000,
+      },
+    );
 
-    for (const waitFor of ['postgen', 'completed'] as const) {
-      const { outcomes, documentedSpec } = await pollBuild({ stainless, build, waitFor });
+    for (const waitFor of ["postgen", "completed"] as const) {
+      const { outcomes, documentedSpec } = await pollBuild({
+        stainless,
+        build,
+        waitFor,
+      });
 
       let documentedSpecPath = null;
       if (outputDir && documentedSpec) {
@@ -109,7 +119,7 @@ export async function *runBuilds({
         documentedSpecPath,
       };
     }
-    
+
     return;
   }
 
@@ -133,43 +143,47 @@ export async function *runBuilds({
   }
 
   console.log(`Hard resetting ${branch} to ${baseRevision}`);
-  const { config_commit } = await stainless.projects.branches.create(
-    {
-      branch_from: baseRevision,
-      branch: branch!,
-      force: true,
-    },
-  );
+  const { config_commit } = await stainless.projects.branches.create({
+    branch_from: baseRevision,
+    branch: branch!,
+    force: true,
+  });
   console.log(`Hard reset ${branch}, now at ${config_commit.sha}`);
 
-  const { base, head } = await stainless.builds.compare({
-    base: {
-      revision: baseRevision,
-      branch: baseBranch,
-      commit_message: commitMessage,
-    },
-    head: {
-      revision: {
-        ...(oasContent && {
-          "openapi.yml": {
-            content: oasContent,
-          },
-        }),
-        ...(configContent && {
-          "openapi.stainless.yml": {
-            content: configContent,
-          },
-        }),
+  const { base, head } = await stainless.builds.compare(
+    {
+      base: {
+        revision: baseRevision,
+        branch: baseBranch,
+        commit_message: commitMessage,
       },
-      branch,
-      commit_message: commitMessage,
+      head: {
+        revision: {
+          ...(oasContent && {
+            "openapi.yml": {
+              content: oasContent,
+            },
+          }),
+          ...(configContent && {
+            "openapi.stainless.yml": {
+              content: configContent,
+            },
+          }),
+        },
+        branch,
+        commit_message: commitMessage,
+      },
     },
-  });
+    {
+      // For very large specs, writing the config files can take a while.
+      timeout: 3 * 60 * 1000,
+    },
+  );
 
-  for (const waitFor of ['postgen', 'completed'] as const) {
+  for (const waitFor of ["postgen", "completed"] as const) {
     // yield once when the head is in postgen and again once it's completed
     const results = await Promise.all([
-      pollBuild({ stainless, build: base, waitFor: 'postgen' }),
+      pollBuild({ stainless, build: base, waitFor: "postgen" }),
       pollBuild({ stainless, build: head, waitFor }),
     ]);
 
@@ -199,7 +213,7 @@ async function pollBuild({
 }: {
   stainless: Stainless;
   build: Build;
-  waitFor: 'postgen' | 'completed';
+  waitFor: "postgen" | "completed";
   pollingIntervalSeconds?: number;
   maxPollingSeconds?: number;
 }) {
@@ -233,12 +247,15 @@ async function pollBuild({
           `[${buildId}] Build for ${language} has status ${buildOutput.status}`,
         );
 
-        if ([waitFor, 'completed'].includes(buildOutput.status) && buildOutput.commit.status === "completed") {
+        if (
+          [waitFor, "completed"].includes(buildOutput.status) &&
+          buildOutput.commit.status === "completed"
+        ) {
           console.log(
             `[${buildId}] Build has output:`,
             JSON.stringify(buildOutput),
           );
-          outcomes[language] = {...buildOutput, commit: buildOutput.commit};
+          outcomes[language] = { ...buildOutput, commit: buildOutput.commit };
         }
       }
     }
@@ -272,12 +289,12 @@ async function pollBuild({
       },
       commit: {
         status: "completed",
-          completed: {
+        completed: {
           conclusion: "timed_out",
           commit: null,
           merge_conflict_pr: null,
-        }
-      }
+        },
+      },
     };
   }
 
