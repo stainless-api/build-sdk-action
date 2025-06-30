@@ -25828,7 +25828,8 @@ ${header}${tableRows}
 }
 async function upsertComment({
   body,
-  token
+  token,
+  skipCreate = false
 }) {
   const octokit = github.getOctokit(token);
   console.log(
@@ -25852,7 +25853,7 @@ async function upsertComment({
       comment_id: existingComment.id,
       body
     });
-  } else {
+  } else if (!skipCreate) {
     console.log("Creating new comment");
     await octokit.rest.issues.createComment({
       owner: github.context.repo.owner,

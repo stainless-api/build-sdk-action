@@ -34,7 +34,11 @@ async function main() {
       throw new Error("github_token is required to make a comment");
     }
 
-    const stainless = new Stainless({ project: projectName, apiKey, logLevel: "warn" });
+    const stainless = new Stainless({
+      project: projectName,
+      apiKey,
+      logLevel: "warn",
+    });
 
     startGroup("Getting parent revision");
 
@@ -54,6 +58,21 @@ async function main() {
 
     if (!configChanged) {
       console.log("No config files changed, skipping preview");
+
+      if (makeComment) {
+        startGroup("Updating comment");
+
+        const commentBody = generatePreviewComment({ noChanges: true });
+
+        await upsertComment({
+          body: commentBody,
+          token: githubToken,
+          skipCreate: true,
+        });
+
+        endGroup();
+      }
+
       return;
     }
 
@@ -83,7 +102,7 @@ async function main() {
       branch,
       guessConfig: !configPath,
       commitMessage,
-    })
+    });
 
     while (true) {
       startGroup("Running builds");
@@ -108,7 +127,7 @@ async function main() {
       latestRun = run.value;
 
       if (makeComment) {
-        const {outcomes, baseOutcomes} = latestRun;
+        const { outcomes, baseOutcomes } = latestRun;
 
         startGroup("Updating comment");
 
@@ -123,8 +142,7 @@ async function main() {
 
         endGroup();
       }
-    } 
-
+    }
   } catch (error) {
     console.error("Error in preview action:", error);
     process.exit(1);
