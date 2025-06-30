@@ -21483,24 +21483,30 @@ async function* runBuilds({
   const oasContent = oasPath ? fs.readFileSync(oasPath, "utf-8") : void 0;
   let configContent = configPath ? fs.readFileSync(configPath, "utf-8") : void 0;
   if (!baseRevision) {
-    const build = await stainless.builds.create({
-      project: projectName,
-      revision: mergeBranch ? `${branch}..${mergeBranch}` : {
-        ...oasContent && {
-          "openapi.yml": {
-            content: oasContent
+    const build = await stainless.builds.create(
+      {
+        project: projectName,
+        revision: mergeBranch ? `${branch}..${mergeBranch}` : {
+          ...oasContent && {
+            "openapi.yml": {
+              content: oasContent
+            }
+          },
+          ...configContent && {
+            "openapi.stainless.yml": {
+              content: configContent
+            }
           }
         },
-        ...configContent && {
-          "openapi.stainless.yml": {
-            content: configContent
-          }
-        }
+        branch,
+        commit_message: commitMessage,
+        allow_empty: true
       },
-      branch,
-      commit_message: commitMessage,
-      allow_empty: true
-    });
+      {
+        // For very large specs, writing the config files can take a while.
+        timeout: 3 * 60 * 1e3
+      }
+    );
     for (const waitFor of ["postgen", "completed"]) {
       const { outcomes, documentedSpec } = await pollBuild({
         stainless,
@@ -21540,41 +21546,41 @@ async function* runBuilds({
     }
   }
   console.log(`Hard resetting ${branch} to ${baseRevision}`);
-  const { config_commit } = await stainless.projects.branches.create(
+  const { config_commit } = await stainless.projects.branches.create({
+    branch_from: baseRevision,
+    branch,
+    force: true
+  });
+  console.log(`Hard reset ${branch}, now at ${config_commit.sha}`);
+  const { base, head } = await stainless.builds.compare(
     {
-      branch_from: baseRevision,
-      branch,
-      force: true
+      base: {
+        revision: baseRevision,
+        branch: baseBranch,
+        commit_message: commitMessage
+      },
+      head: {
+        revision: {
+          ...oasContent && {
+            "openapi.yml": {
+              content: oasContent
+            }
+          },
+          ...configContent && {
+            "openapi.stainless.yml": {
+              content: configContent
+            }
+          }
+        },
+        branch,
+        commit_message: commitMessage
+      }
     },
     {
       // For very large specs, writing the config files can take a while.
       timeout: 3 * 60 * 1e3
     }
   );
-  console.log(`Hard reset ${branch}, now at ${config_commit.sha}`);
-  const { base, head } = await stainless.builds.compare({
-    base: {
-      revision: baseRevision,
-      branch: baseBranch,
-      commit_message: commitMessage
-    },
-    head: {
-      revision: {
-        ...oasContent && {
-          "openapi.yml": {
-            content: oasContent
-          }
-        },
-        ...configContent && {
-          "openapi.stainless.yml": {
-            content: configContent
-          }
-        }
-      },
-      branch,
-      commit_message: commitMessage
-    }
-  });
   for (const waitFor of ["postgen", "completed"]) {
     const results = await Promise.all([
       pollBuild({ stainless, build: base, waitFor: "postgen" }),
