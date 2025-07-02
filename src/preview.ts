@@ -6,6 +6,7 @@ import {
   startGroup,
 } from "@actions/core";
 import * as exec from "@actions/exec";
+import * as github from "@actions/github";
 import { Stainless } from "@stainless-api/sdk";
 import { checkResults, runBuilds } from "./build";
 import { isConfigChanged } from "./config";
@@ -59,7 +60,10 @@ async function main() {
     if (!configChanged) {
       console.log("No config files changed, skipping preview");
 
-      if (makeComment) {
+      if (
+        github.context.payload.pull_request!.action !== "opened" &&
+        makeComment
+      ) {
         startGroup("Updating comment");
 
         const commentBody = generatePreviewComment({ noChanges: true });
