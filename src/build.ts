@@ -313,7 +313,9 @@ export function checkResults({
   }
 
   const failedLanguages = Object.entries(outcomes).filter(([_, outcome]) => {
-    if (!outcome.commit) return true;
+    if (!outcome.commit || outcome.commit.completed.conclusion === "noop") {
+      return true;
+    }
     if (
       failRunOn === "error" ||
       failRunOn === "warning" ||
