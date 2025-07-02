@@ -19811,7 +19811,7 @@ Support boolean input list: \`true | True | TRUE | false | False | FALSE\``);
 // src/index.ts
 var import_core = __toESM(require_core());
 
-// node_modules/stainless/internal/tslib.mjs
+// node_modules/@stainless-api/sdk/internal/tslib.mjs
 function __classPrivateFieldSet(receiver, state, value, kind, f) {
   if (kind === "m")
     throw new TypeError("Private method is not writable");
@@ -19829,7 +19829,7 @@ function __classPrivateFieldGet(receiver, state, kind, f) {
   return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
 }
 
-// node_modules/stainless/internal/utils/uuid.mjs
+// node_modules/@stainless-api/sdk/internal/utils/uuid.mjs
 var uuid4 = function() {
   const { crypto } = globalThis;
   if (crypto?.randomUUID) {
@@ -19841,7 +19841,7 @@ var uuid4 = function() {
   return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (+c ^ randomByte() & 15 >> +c / 4).toString(16));
 };
 
-// node_modules/stainless/internal/errors.mjs
+// node_modules/@stainless-api/sdk/internal/errors.mjs
 function isAbortError(err) {
   return typeof err === "object" && err !== null && // Spec-compliant fetch implementations
   ("name" in err && err.name === "AbortError" || // Expo fetch
@@ -19872,7 +19872,7 @@ var castToError = (err) => {
   return new Error(err);
 };
 
-// node_modules/stainless/core/error.mjs
+// node_modules/@stainless-api/sdk/core/error.mjs
 var StainlessError = class extends Error {
 };
 var APIError = class _APIError extends StainlessError {
@@ -19961,11 +19961,19 @@ var RateLimitError = class extends APIError {
 var InternalServerError = class extends APIError {
 };
 
-// node_modules/stainless/internal/utils/values.mjs
+// node_modules/@stainless-api/sdk/internal/utils/values.mjs
 var startsWithSchemeRegexp = /^[a-z][a-z0-9+.-]*:/i;
 var isAbsoluteURL = (url) => {
   return startsWithSchemeRegexp.test(url);
 };
+var isArray = (val) => (isArray = Array.isArray, isArray(val));
+var isReadonlyArray = isArray;
+function maybeObj(x) {
+  if (typeof x !== "object") {
+    return {};
+  }
+  return x ?? {};
+}
 function isEmptyObj(obj) {
   if (!obj)
     return true;
@@ -19993,86 +20001,13 @@ var safeJSON = (text) => {
   }
 };
 
-// node_modules/stainless/internal/utils/sleep.mjs
+// node_modules/@stainless-api/sdk/internal/utils/sleep.mjs
 var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// node_modules/stainless/internal/utils/log.mjs
-var levelNumbers = {
-  off: 0,
-  error: 200,
-  warn: 300,
-  info: 400,
-  debug: 500
-};
-var parseLogLevel = (maybeLevel, sourceName, client) => {
-  if (!maybeLevel) {
-    return void 0;
-  }
-  if (hasOwn(levelNumbers, maybeLevel)) {
-    return maybeLevel;
-  }
-  loggerFor(client).warn(`${sourceName} was set to ${JSON.stringify(maybeLevel)}, expected one of ${JSON.stringify(Object.keys(levelNumbers))}`);
-  return void 0;
-};
-function noop() {
-}
-function makeLogFn(fnLevel, logger, logLevel) {
-  if (!logger || levelNumbers[fnLevel] > levelNumbers[logLevel]) {
-    return noop;
-  } else {
-    return logger[fnLevel].bind(logger);
-  }
-}
-var noopLogger = {
-  error: noop,
-  warn: noop,
-  info: noop,
-  debug: noop
-};
-var cachedLoggers = /* @__PURE__ */ new WeakMap();
-function loggerFor(client) {
-  const logger = client.logger;
-  const logLevel = client.logLevel ?? "off";
-  if (!logger) {
-    return noopLogger;
-  }
-  const cachedLogger = cachedLoggers.get(logger);
-  if (cachedLogger && cachedLogger[0] === logLevel) {
-    return cachedLogger[1];
-  }
-  const levelLogger = {
-    error: makeLogFn("error", logger, logLevel),
-    warn: makeLogFn("warn", logger, logLevel),
-    info: makeLogFn("info", logger, logLevel),
-    debug: makeLogFn("debug", logger, logLevel)
-  };
-  cachedLoggers.set(logger, [logLevel, levelLogger]);
-  return levelLogger;
-}
-var formatRequestDetails = (details) => {
-  if (details.options) {
-    details.options = { ...details.options };
-    delete details.options["headers"];
-  }
-  if (details.headers) {
-    details.headers = Object.fromEntries((details.headers instanceof Headers ? [...details.headers] : Object.entries(details.headers)).map(([name, value]) => [
-      name,
-      name.toLowerCase() === "authorization" || name.toLowerCase() === "cookie" || name.toLowerCase() === "set-cookie" ? "***" : value
-    ]));
-  }
-  if ("retryOfRequestLogID" in details) {
-    if (details.retryOfRequestLogID) {
-      details.retryOf = details.retryOfRequestLogID;
-    }
-    delete details.retryOfRequestLogID;
-  }
-  return details;
-};
+// node_modules/@stainless-api/sdk/version.mjs
+var VERSION = "0.1.0-alpha.10";
 
-// node_modules/stainless/version.mjs
-var VERSION = "0.1.0-alpha.4";
-
-// node_modules/stainless/internal/detect-platform.mjs
+// node_modules/@stainless-api/sdk/internal/detect-platform.mjs
 function getDetectedPlatform() {
   if (typeof Deno !== "undefined" && Deno.build != null) {
     return "deno";
@@ -20198,7 +20133,7 @@ var getPlatformHeaders = () => {
   return _platformHeaders ?? (_platformHeaders = getPlatformProperties());
 };
 
-// node_modules/stainless/internal/shims.mjs
+// node_modules/@stainless-api/sdk/internal/shims.mjs
 function getDefaultFetch() {
   if (typeof fetch !== "undefined") {
     return fetch;
@@ -20243,7 +20178,7 @@ async function CancelReadableStream(stream) {
   await cancelPromise;
 }
 
-// node_modules/stainless/internal/request-options.mjs
+// node_modules/@stainless-api/sdk/internal/request-options.mjs
 var FallbackEncoder = ({ headers, body }) => {
   return {
     bodyHeaders: {
@@ -20253,17 +20188,18 @@ var FallbackEncoder = ({ headers, body }) => {
   };
 };
 
-// node_modules/stainless/internal/qs/formats.mjs
+// node_modules/@stainless-api/sdk/internal/qs/formats.mjs
 var default_format = "RFC3986";
+var default_formatter = (v) => String(v);
 var formatters = {
   RFC1738: (v) => String(v).replace(/%20/g, "+"),
-  RFC3986: (v) => String(v)
+  RFC3986: default_formatter
 };
 var RFC1738 = "RFC1738";
 
-// node_modules/stainless/internal/qs/utils.mjs
-var is_array = Array.isArray;
-var hex_table = (() => {
+// node_modules/@stainless-api/sdk/internal/qs/utils.mjs
+var has = (obj, key) => (has = Object.hasOwn ?? Function.prototype.call.bind(Object.prototype.hasOwnProperty), has(obj, key));
+var hex_table = /* @__PURE__ */ (() => {
   const array = [];
   for (let i = 0; i < 256; ++i) {
     array.push("%" + ((i < 16 ? "0" : "") + i.toString(16)).toUpperCase());
@@ -20330,7 +20266,7 @@ function is_buffer(obj) {
   return !!(obj.constructor && obj.constructor.isBuffer && obj.constructor.isBuffer(obj));
 }
 function maybe_map(val, fn) {
-  if (is_array(val)) {
+  if (isArray(val)) {
     const mapped = [];
     for (let i = 0; i < val.length; i += 1) {
       mapped.push(fn(val[i]));
@@ -20340,8 +20276,7 @@ function maybe_map(val, fn) {
   return fn(val);
 }
 
-// node_modules/stainless/internal/qs/stringify.mjs
-var has = Object.prototype.hasOwnProperty;
+// node_modules/@stainless-api/sdk/internal/qs/stringify.mjs
 var array_prefix_generators = {
   brackets(prefix) {
     return String(prefix) + "[]";
@@ -20354,12 +20289,10 @@ var array_prefix_generators = {
     return String(prefix);
   }
 };
-var is_array2 = Array.isArray;
-var push = Array.prototype.push;
 var push_to_array = function(arr, value_or_array) {
-  push.apply(arr, is_array2(value_or_array) ? value_or_array : [value_or_array]);
+  Array.prototype.push.apply(arr, isArray(value_or_array) ? value_or_array : [value_or_array]);
 };
-var to_ISO = Date.prototype.toISOString;
+var toISOString;
 var defaults = {
   addQueryPrefix: false,
   allowDots: false,
@@ -20373,11 +20306,11 @@ var defaults = {
   encoder: encode,
   encodeValuesOnly: false,
   format: default_format,
-  formatter: formatters[default_format],
+  formatter: default_formatter,
   /** @deprecated */
   indices: false,
   serializeDate(date) {
-    return to_ISO.call(date);
+    return (toISOString ?? (toISOString = Function.prototype.call.bind(Date.prototype.toISOString)))(date);
   },
   skipNulls: false,
   strictNullHandling: false
@@ -20409,7 +20342,7 @@ function inner_stringify(object, prefix, generateArrayPrefix, commaRoundTrip, al
     obj = filter(prefix, obj);
   } else if (obj instanceof Date) {
     obj = serializeDate?.(obj);
-  } else if (generateArrayPrefix === "comma" && is_array2(obj)) {
+  } else if (generateArrayPrefix === "comma" && isArray(obj)) {
     obj = maybe_map(obj, function(value) {
       if (value instanceof Date) {
         return serializeDate?.(value);
@@ -20441,20 +20374,20 @@ function inner_stringify(object, prefix, generateArrayPrefix, commaRoundTrip, al
     return values;
   }
   let obj_keys;
-  if (generateArrayPrefix === "comma" && is_array2(obj)) {
+  if (generateArrayPrefix === "comma" && isArray(obj)) {
     if (encodeValuesOnly && encoder) {
       obj = maybe_map(obj, encoder);
     }
     obj_keys = [{ value: obj.length > 0 ? obj.join(",") || null : void 0 }];
-  } else if (is_array2(filter)) {
+  } else if (isArray(filter)) {
     obj_keys = filter;
   } else {
     const keys = Object.keys(obj);
     obj_keys = sort ? keys.sort(sort) : keys;
   }
   const encoded_prefix = encodeDotInKeys ? String(prefix).replace(/\./g, "%2E") : String(prefix);
-  const adjusted_prefix = commaRoundTrip && is_array2(obj) && obj.length === 1 ? encoded_prefix + "[]" : encoded_prefix;
-  if (allowEmptyArrays && is_array2(obj) && obj.length === 0) {
+  const adjusted_prefix = commaRoundTrip && isArray(obj) && obj.length === 1 ? encoded_prefix + "[]" : encoded_prefix;
+  if (allowEmptyArrays && isArray(obj) && obj.length === 0) {
     return adjusted_prefix + "[]";
   }
   for (let j = 0; j < obj_keys.length; ++j) {
@@ -20467,7 +20400,7 @@ function inner_stringify(object, prefix, generateArrayPrefix, commaRoundTrip, al
       continue;
     }
     const encoded_key = allowDots && encodeDotInKeys ? key.replace(/\./g, "%2E") : key;
-    const key_prefix = is_array2(obj) ? typeof generateArrayPrefix === "function" ? generateArrayPrefix(adjusted_prefix, encoded_key) : adjusted_prefix : adjusted_prefix + (allowDots ? "." + encoded_key : "[" + encoded_key + "]");
+    const key_prefix = isArray(obj) ? typeof generateArrayPrefix === "function" ? generateArrayPrefix(adjusted_prefix, encoded_key) : adjusted_prefix : adjusted_prefix + (allowDots ? "." + encoded_key : "[" + encoded_key + "]");
     sideChannel.set(object, step);
     const valueSideChannel = /* @__PURE__ */ new WeakMap();
     valueSideChannel.set(sentinel, sideChannel);
@@ -20481,7 +20414,7 @@ function inner_stringify(object, prefix, generateArrayPrefix, commaRoundTrip, al
       skipNulls,
       encodeDotInKeys,
       // @ts-ignore
-      generateArrayPrefix === "comma" && encodeValuesOnly && is_array2(obj) ? null : encoder,
+      generateArrayPrefix === "comma" && encodeValuesOnly && isArray(obj) ? null : encoder,
       filter,
       sort,
       allowDots,
@@ -20511,14 +20444,14 @@ function normalize_stringify_options(opts = defaults) {
   }
   let format = default_format;
   if (typeof opts.format !== "undefined") {
-    if (!has.call(formatters, opts.format)) {
+    if (!has(formatters, opts.format)) {
       throw new TypeError("Unknown format option provided.");
     }
     format = opts.format;
   }
   const formatter = formatters[format];
   let filter = defaults.filter;
-  if (typeof opts.filter === "function" || is_array2(opts.filter)) {
+  if (typeof opts.filter === "function" || isArray(opts.filter)) {
     filter = opts.filter;
   }
   let arrayFormat;
@@ -20565,7 +20498,7 @@ function stringify(object, opts = {}) {
   if (typeof options.filter === "function") {
     filter = options.filter;
     obj = filter("", obj);
-  } else if (is_array2(options.filter)) {
+  } else if (isArray(options.filter)) {
     filter = options.filter;
     obj_keys = filter;
   }
@@ -20621,267 +20554,80 @@ function stringify(object, opts = {}) {
   return joined.length > 0 ? prefix + joined : "";
 }
 
-// node_modules/stainless/internal/uploads.mjs
-var checkFileSupport = () => {
-  if (typeof File === "undefined") {
-    const { process: process2 } = globalThis;
-    const isOldNode = typeof process2?.versions?.node === "string" && parseInt(process2.versions.node.split(".")) < 20;
-    throw new Error("`File` is not defined as a global, which is required for file uploads." + (isOldNode ? " Update to Node 20 LTS or newer, or set `globalThis.File` to `import('node:buffer').File`." : ""));
-  }
+// node_modules/@stainless-api/sdk/internal/utils/log.mjs
+var levelNumbers = {
+  off: 0,
+  error: 200,
+  warn: 300,
+  info: 400,
+  debug: 500
 };
-function makeFile(fileBits, fileName, options) {
-  checkFileSupport();
-  return new File(fileBits, fileName ?? "unknown_file", options);
-}
-function getName(value) {
-  return (typeof value === "object" && value !== null && ("name" in value && value.name && String(value.name) || "url" in value && value.url && String(value.url) || "filename" in value && value.filename && String(value.filename) || "path" in value && value.path && String(value.path)) || "").split(/[\\/]/).pop() || void 0;
-}
-var isAsyncIterable = (value) => value != null && typeof value === "object" && typeof value[Symbol.asyncIterator] === "function";
-
-// node_modules/stainless/internal/to-file.mjs
-var isBlobLike = (value) => value != null && typeof value === "object" && typeof value.size === "number" && typeof value.type === "string" && typeof value.text === "function" && typeof value.slice === "function" && typeof value.arrayBuffer === "function";
-var isFileLike = (value) => value != null && typeof value === "object" && typeof value.name === "string" && typeof value.lastModified === "number" && isBlobLike(value);
-var isResponseLike = (value) => value != null && typeof value === "object" && typeof value.url === "string" && typeof value.blob === "function";
-async function toFile(value, name, options) {
-  checkFileSupport();
-  value = await value;
-  if (isFileLike(value)) {
-    if (value instanceof File) {
-      return value;
-    }
-    return makeFile([await value.arrayBuffer()], value.name);
+var parseLogLevel = (maybeLevel, sourceName, client) => {
+  if (!maybeLevel) {
+    return void 0;
   }
-  if (isResponseLike(value)) {
-    const blob = await value.blob();
-    name || (name = new URL(value.url).pathname.split(/[\\/]/).pop());
-    return makeFile(await getBytes(blob), name, options);
+  if (hasOwn(levelNumbers, maybeLevel)) {
+    return maybeLevel;
   }
-  const parts = await getBytes(value);
-  name || (name = getName(value));
-  if (!options?.type) {
-    const type = parts.find((part) => typeof part === "object" && "type" in part && part.type);
-    if (typeof type === "string") {
-      options = { ...options, type };
-    }
-  }
-  return makeFile(parts, name, options);
+  loggerFor(client).warn(`${sourceName} was set to ${JSON.stringify(maybeLevel)}, expected one of ${JSON.stringify(Object.keys(levelNumbers))}`);
+  return void 0;
+};
+function noop() {
 }
-async function getBytes(value) {
-  let parts = [];
-  if (typeof value === "string" || ArrayBuffer.isView(value) || // includes Uint8Array, Buffer, etc.
-  value instanceof ArrayBuffer) {
-    parts.push(value);
-  } else if (isBlobLike(value)) {
-    parts.push(value instanceof Blob ? value : await value.arrayBuffer());
-  } else if (isAsyncIterable(value)) {
-    for await (const chunk of value) {
-      parts.push(...await getBytes(chunk));
-    }
+function makeLogFn(fnLevel, logger, logLevel) {
+  if (!logger || levelNumbers[fnLevel] > levelNumbers[logLevel]) {
+    return noop;
   } else {
-    const constructor = value?.constructor?.name;
-    throw new Error(`Unexpected data type: ${typeof value}${constructor ? `; constructor: ${constructor}` : ""}${propsForError(value)}`);
+    return logger[fnLevel].bind(logger);
   }
-  return parts;
 }
-function propsForError(value) {
-  if (typeof value !== "object" || value === null)
-    return "";
-  const props = Object.getOwnPropertyNames(value);
-  return `; props: [${props.map((p) => `"${p}"`).join(", ")}]`;
-}
-
-// node_modules/stainless/core/resource.mjs
-var APIResource = class {
-  constructor(client) {
-    this._client = client;
-  }
+var noopLogger = {
+  error: noop,
+  warn: noop,
+  info: noop,
+  debug: noop
 };
-
-// node_modules/stainless/resources/builds/target-outputs.mjs
-var TargetOutputs = class extends APIResource {
-  /**
-   * Download the output of a build target
-   */
-  retrieve(query, options) {
-    return this._client.get("/v0/build_target_outputs", { query, ...options });
+var cachedLoggers = /* @__PURE__ */ new WeakMap();
+function loggerFor(client) {
+  const logger = client.logger;
+  const logLevel = client.logLevel ?? "off";
+  if (!logger) {
+    return noopLogger;
   }
-};
-
-// node_modules/stainless/internal/utils/path.mjs
-function encodeURIPath(str) {
-  return str.replace(/[^A-Za-z0-9\-._~!$&'()*+,;=:@]+/g, encodeURIComponent);
+  const cachedLogger = cachedLoggers.get(logger);
+  if (cachedLogger && cachedLogger[0] === logLevel) {
+    return cachedLogger[1];
+  }
+  const levelLogger = {
+    error: makeLogFn("error", logger, logLevel),
+    warn: makeLogFn("warn", logger, logLevel),
+    info: makeLogFn("info", logger, logLevel),
+    debug: makeLogFn("debug", logger, logLevel)
+  };
+  cachedLoggers.set(logger, [logLevel, levelLogger]);
+  return levelLogger;
 }
-var createPathTagFunction = (pathEncoder = encodeURIPath) => function path2(statics, ...params) {
-  if (statics.length === 1)
-    return statics[0];
-  let postPath = false;
-  const path3 = statics.reduce((previousValue, currentValue, index) => {
-    if (/[?#]/.test(currentValue)) {
-      postPath = true;
+var formatRequestDetails = (details) => {
+  if (details.options) {
+    details.options = { ...details.options };
+    delete details.options["headers"];
+  }
+  if (details.headers) {
+    details.headers = Object.fromEntries((details.headers instanceof Headers ? [...details.headers] : Object.entries(details.headers)).map(([name, value]) => [
+      name,
+      name.toLowerCase() === "authorization" || name.toLowerCase() === "cookie" || name.toLowerCase() === "set-cookie" ? "***" : value
+    ]));
+  }
+  if ("retryOfRequestLogID" in details) {
+    if (details.retryOfRequestLogID) {
+      details.retryOf = details.retryOfRequestLogID;
     }
-    return previousValue + currentValue + (index === params.length ? "" : (postPath ? encodeURIComponent : pathEncoder)(String(params[index])));
-  }, "");
-  const pathOnly = path3.split(/[?#]/, 1)[0];
-  const invalidSegments = [];
-  const invalidSegmentPattern = /(?<=^|\/)(?:\.|%2e){1,2}(?=\/|$)/gi;
-  let match;
-  while ((match = invalidSegmentPattern.exec(pathOnly)) !== null) {
-    invalidSegments.push({
-      start: match.index,
-      length: match[0].length
-    });
+    delete details.retryOfRequestLogID;
   }
-  if (invalidSegments.length > 0) {
-    let lastEnd = 0;
-    const underline = invalidSegments.reduce((acc, segment) => {
-      const spaces = " ".repeat(segment.start - lastEnd);
-      const arrows = "^".repeat(segment.length);
-      lastEnd = segment.start + segment.length;
-      return acc + spaces + arrows;
-    }, "");
-    throw new StainlessError(`Path parameters result in path with invalid segments:
-${path3}
-${underline}`);
-  }
-  return path3;
-};
-var path = createPathTagFunction(encodeURIPath);
-
-// node_modules/stainless/resources/builds/builds.mjs
-var Builds = class extends APIResource {
-  constructor() {
-    super(...arguments);
-    this.targetOutputs = new TargetOutputs(this._client);
-  }
-  /**
-   * Create a new build
-   */
-  create(params, options) {
-    const { project = this._client.project, ...body } = params;
-    return this._client.post("/v0/builds", { body: { project, ...body }, ...options });
-  }
-  /**
-   * Retrieve a build by ID
-   */
-  retrieve(buildID, options) {
-    return this._client.get(path`/v0/builds/${buildID}`, options);
-  }
-  /**
-   * List builds for a project
-   */
-  list(params = {}, options) {
-    const { project = this._client.project, ...query } = params ?? {};
-    return this._client.get("/v0/builds", { query: { project, ...query }, ...options });
-  }
-  /**
-   * Creates two builds whose outputs can be compared directly
-   */
-  compare(params, options) {
-    const { project = this._client.project, ...body } = params;
-    return this._client.post("/v0/builds/compare", { body: { project, ...body }, ...options });
-  }
-};
-Builds.TargetOutputs = TargetOutputs;
-
-// node_modules/stainless/resources/orgs.mjs
-var Orgs = class extends APIResource {
-  /**
-   * Retrieve an organization by name
-   */
-  retrieve(org, options) {
-    return this._client.get(path`/v0/orgs/${org}`, options);
-  }
-  /**
-   * List organizations the user has access to
-   */
-  list(options) {
-    return this._client.get("/v0/orgs", options);
-  }
+  return details;
 };
 
-// node_modules/stainless/resources/projects/branches.mjs
-var Branches = class extends APIResource {
-  /**
-   * Create a new branch for a project
-   */
-  create(params, options) {
-    const { project = this._client.project, ...body } = params;
-    return this._client.post(path`/v0/projects/${project}/branches`, { body, ...options });
-  }
-  /**
-   * Retrieve a project branch
-   */
-  retrieve(branch, params = {}, options) {
-    const { project = this._client.project } = params ?? {};
-    return this._client.get(path`/v0/projects/${project}/branches/${branch}`, options);
-  }
-};
-
-// node_modules/stainless/resources/projects/configs.mjs
-var Configs = class extends APIResource {
-  /**
-   * Retrieve configuration files for a project
-   */
-  retrieve(params = {}, options) {
-    const { project = this._client.project, ...query } = params ?? {};
-    return this._client.get(path`/v0/projects/${project}/configs`, { query, ...options });
-  }
-  /**
-   * Generate configuration suggestions based on an OpenAPI spec
-   */
-  guess(params, options) {
-    const { project = this._client.project, ...body } = params;
-    return this._client.post(path`/v0/projects/${project}/configs/guess`, { body, ...options });
-  }
-};
-
-// node_modules/stainless/resources/projects/snippets.mjs
-var Snippets = class extends APIResource {
-  createRequest(projectName, body, options) {
-    return this._client.post(path`/v0/projects/${projectName}/snippets/request`, { body, ...options });
-  }
-};
-
-// node_modules/stainless/resources/projects/projects.mjs
-var Projects = class extends APIResource {
-  constructor() {
-    super(...arguments);
-    this.branches = new Branches(this._client);
-    this.configs = new Configs(this._client);
-    this.snippets = new Snippets(this._client);
-  }
-  /**
-   * Create a new project
-   */
-  create(body, options) {
-    return this._client.post("/v0/projects", { body, ...options });
-  }
-  /**
-   * Retrieve a project by name
-   */
-  retrieve(params = {}, options) {
-    const { project = this._client.project } = params ?? {};
-    return this._client.get(path`/v0/projects/${project}`, options);
-  }
-  /**
-   * Update a project's properties
-   */
-  update(params = {}, options) {
-    const { project = this._client.project, ...body } = params ?? {};
-    return this._client.patch(path`/v0/projects/${project}`, { body, ...options });
-  }
-  /**
-   * List projects in an organization
-   */
-  list(query = {}, options) {
-    return this._client.get("/v0/projects", { query, ...options });
-  }
-};
-Projects.Branches = Branches;
-Projects.Configs = Configs;
-Projects.Snippets = Snippets;
-
-// node_modules/stainless/internal/parse.mjs
+// node_modules/@stainless-api/sdk/internal/parse.mjs
 async function defaultParseResponse(client, props) {
   const { response, requestLogID, retryOfRequestLogID, startTime } = props;
   const body = await (async () => {
@@ -20911,7 +20657,7 @@ async function defaultParseResponse(client, props) {
   return body;
 }
 
-// node_modules/stainless/core/api-promise.mjs
+// node_modules/@stainless-api/sdk/core/api-promise.mjs
 var _APIPromise_client;
 var APIPromise = class _APIPromise extends Promise {
   constructor(client, responsePromise, parseResponse = defaultParseResponse) {
@@ -20972,9 +20718,381 @@ var APIPromise = class _APIPromise extends Promise {
 };
 _APIPromise_client = /* @__PURE__ */ new WeakMap();
 
-// node_modules/stainless/internal/headers.mjs
-var brand_privateNullableHeaders = Symbol("brand.privateNullableHeaders");
-var isArray = Array.isArray;
+// node_modules/@stainless-api/sdk/core/pagination.mjs
+var _AbstractPage_client;
+var AbstractPage = class {
+  constructor(client, response, body, options) {
+    _AbstractPage_client.set(this, void 0);
+    __classPrivateFieldSet(this, _AbstractPage_client, client, "f");
+    this.options = options;
+    this.response = response;
+    this.body = body;
+  }
+  hasNextPage() {
+    const items = this.getPaginatedItems();
+    if (!items.length)
+      return false;
+    return this.nextPageRequestOptions() != null;
+  }
+  async getNextPage() {
+    const nextOptions = this.nextPageRequestOptions();
+    if (!nextOptions) {
+      throw new StainlessError("No next page expected; please check `.hasNextPage()` before calling `.getNextPage()`.");
+    }
+    return await __classPrivateFieldGet(this, _AbstractPage_client, "f").requestAPIList(this.constructor, nextOptions);
+  }
+  async *iterPages() {
+    let page = this;
+    yield page;
+    while (page.hasNextPage()) {
+      page = await page.getNextPage();
+      yield page;
+    }
+  }
+  async *[(_AbstractPage_client = /* @__PURE__ */ new WeakMap(), Symbol.asyncIterator)]() {
+    for await (const page of this.iterPages()) {
+      for (const item of page.getPaginatedItems()) {
+        yield item;
+      }
+    }
+  }
+};
+var PagePromise = class extends APIPromise {
+  constructor(client, request, Page) {
+    super(client, request, async (client2, props) => new Page(client2, props.response, await defaultParseResponse(client2, props), props.options));
+  }
+  /**
+   * Allow auto-paginating iteration on an unawaited list call, eg:
+   *
+   *    for await (const item of client.items.list()) {
+   *      console.log(item)
+   *    }
+   */
+  async *[Symbol.asyncIterator]() {
+    const page = await this;
+    for await (const item of page) {
+      yield item;
+    }
+  }
+};
+var List = class extends AbstractPage {
+  constructor(client, response, body, options) {
+    super(client, response, body, options);
+    this.data = body.data || [];
+    this.next_cursor = body.next_cursor || "";
+  }
+  getPaginatedItems() {
+    return this.data ?? [];
+  }
+  nextPageRequestOptions() {
+    const cursor = this.next_cursor;
+    if (!cursor) {
+      return null;
+    }
+    return {
+      ...this.options,
+      query: {
+        ...maybeObj(this.options.query),
+        cursor
+      }
+    };
+  }
+};
+
+// node_modules/@stainless-api/sdk/internal/uploads.mjs
+var checkFileSupport = () => {
+  if (typeof File === "undefined") {
+    const { process: process2 } = globalThis;
+    const isOldNode = typeof process2?.versions?.node === "string" && parseInt(process2.versions.node.split(".")) < 20;
+    throw new Error("`File` is not defined as a global, which is required for file uploads." + (isOldNode ? " Update to Node 20 LTS or newer, or set `globalThis.File` to `import('node:buffer').File`." : ""));
+  }
+};
+function makeFile(fileBits, fileName, options) {
+  checkFileSupport();
+  return new File(fileBits, fileName ?? "unknown_file", options);
+}
+function getName(value) {
+  return (typeof value === "object" && value !== null && ("name" in value && value.name && String(value.name) || "url" in value && value.url && String(value.url) || "filename" in value && value.filename && String(value.filename) || "path" in value && value.path && String(value.path)) || "").split(/[\\/]/).pop() || void 0;
+}
+var isAsyncIterable = (value) => value != null && typeof value === "object" && typeof value[Symbol.asyncIterator] === "function";
+
+// node_modules/@stainless-api/sdk/internal/to-file.mjs
+var isBlobLike = (value) => value != null && typeof value === "object" && typeof value.size === "number" && typeof value.type === "string" && typeof value.text === "function" && typeof value.slice === "function" && typeof value.arrayBuffer === "function";
+var isFileLike = (value) => value != null && typeof value === "object" && typeof value.name === "string" && typeof value.lastModified === "number" && isBlobLike(value);
+var isResponseLike = (value) => value != null && typeof value === "object" && typeof value.url === "string" && typeof value.blob === "function";
+async function toFile(value, name, options) {
+  checkFileSupport();
+  value = await value;
+  if (isFileLike(value)) {
+    if (value instanceof File) {
+      return value;
+    }
+    return makeFile([await value.arrayBuffer()], value.name);
+  }
+  if (isResponseLike(value)) {
+    const blob = await value.blob();
+    name || (name = new URL(value.url).pathname.split(/[\\/]/).pop());
+    return makeFile(await getBytes(blob), name, options);
+  }
+  const parts = await getBytes(value);
+  name || (name = getName(value));
+  if (!options?.type) {
+    const type = parts.find((part) => typeof part === "object" && "type" in part && part.type);
+    if (typeof type === "string") {
+      options = { ...options, type };
+    }
+  }
+  return makeFile(parts, name, options);
+}
+async function getBytes(value) {
+  let parts = [];
+  if (typeof value === "string" || ArrayBuffer.isView(value) || // includes Uint8Array, Buffer, etc.
+  value instanceof ArrayBuffer) {
+    parts.push(value);
+  } else if (isBlobLike(value)) {
+    parts.push(value instanceof Blob ? value : await value.arrayBuffer());
+  } else if (isAsyncIterable(value)) {
+    for await (const chunk of value) {
+      parts.push(...await getBytes(chunk));
+    }
+  } else {
+    const constructor = value?.constructor?.name;
+    throw new Error(`Unexpected data type: ${typeof value}${constructor ? `; constructor: ${constructor}` : ""}${propsForError(value)}`);
+  }
+  return parts;
+}
+function propsForError(value) {
+  if (typeof value !== "object" || value === null)
+    return "";
+  const props = Object.getOwnPropertyNames(value);
+  return `; props: [${props.map((p) => `"${p}"`).join(", ")}]`;
+}
+
+// node_modules/@stainless-api/sdk/core/resource.mjs
+var APIResource = class {
+  constructor(client) {
+    this._client = client;
+  }
+};
+
+// node_modules/@stainless-api/sdk/internal/utils/path.mjs
+function encodeURIPath(str) {
+  return str.replace(/[^A-Za-z0-9\-._~!$&'()*+,;=:@]+/g, encodeURIComponent);
+}
+var EMPTY = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.create(null));
+var createPathTagFunction = (pathEncoder = encodeURIPath) => function path2(statics, ...params) {
+  if (statics.length === 1)
+    return statics[0];
+  let postPath = false;
+  const invalidSegments = [];
+  const path3 = statics.reduce((previousValue, currentValue, index) => {
+    if (/[?#]/.test(currentValue)) {
+      postPath = true;
+    }
+    const value = params[index];
+    let encoded = (postPath ? encodeURIComponent : pathEncoder)("" + value);
+    if (index !== params.length && (value == null || typeof value === "object" && // handle values from other realms
+    value.toString === Object.getPrototypeOf(Object.getPrototypeOf(value.hasOwnProperty ?? EMPTY) ?? EMPTY)?.toString)) {
+      encoded = value + "";
+      invalidSegments.push({
+        start: previousValue.length + currentValue.length,
+        length: encoded.length,
+        error: `Value of type ${Object.prototype.toString.call(value).slice(8, -1)} is not a valid path parameter`
+      });
+    }
+    return previousValue + currentValue + (index === params.length ? "" : encoded);
+  }, "");
+  const pathOnly = path3.split(/[?#]/, 1)[0];
+  const invalidSegmentPattern = /(?<=^|\/)(?:\.|%2e){1,2}(?=\/|$)/gi;
+  let match;
+  while ((match = invalidSegmentPattern.exec(pathOnly)) !== null) {
+    invalidSegments.push({
+      start: match.index,
+      length: match[0].length,
+      error: `Value "${match[0]}" can't be safely passed as a path parameter`
+    });
+  }
+  invalidSegments.sort((a, b) => a.start - b.start);
+  if (invalidSegments.length > 0) {
+    let lastEnd = 0;
+    const underline = invalidSegments.reduce((acc, segment) => {
+      const spaces = " ".repeat(segment.start - lastEnd);
+      const arrows = "^".repeat(segment.length);
+      lastEnd = segment.start + segment.length;
+      return acc + spaces + arrows;
+    }, "");
+    throw new StainlessError(`Path parameters result in path with invalid segments:
+${invalidSegments.map((e) => e.error).join("\n")}
+${path3}
+${underline}`);
+  }
+  return path3;
+};
+var path = /* @__PURE__ */ createPathTagFunction(encodeURIPath);
+
+// node_modules/@stainless-api/sdk/resources/builds/diagnostics.mjs
+var Diagnostics = class extends APIResource {
+  /**
+   * Get diagnostics for a build
+   */
+  list(buildID, query = {}, options) {
+    return this._client.getAPIList(path`/v0/builds/${buildID}/diagnostics`, List, {
+      query,
+      ...options
+    });
+  }
+};
+
+// node_modules/@stainless-api/sdk/resources/builds/target-outputs.mjs
+var TargetOutputs = class extends APIResource {
+  /**
+   * Download the output of a build target
+   */
+  retrieve(query, options) {
+    return this._client.get("/v0/build_target_outputs", { query, ...options });
+  }
+};
+
+// node_modules/@stainless-api/sdk/resources/builds/builds.mjs
+var Builds = class extends APIResource {
+  constructor() {
+    super(...arguments);
+    this.diagnostics = new Diagnostics(this._client);
+    this.targetOutputs = new TargetOutputs(this._client);
+  }
+  /**
+   * Create a new build
+   */
+  create(params, options) {
+    const { project = this._client.project, ...body } = params;
+    return this._client.post("/v0/builds", { body: { project, ...body }, ...options });
+  }
+  /**
+   * Retrieve a build by ID
+   */
+  retrieve(buildID, options) {
+    return this._client.get(path`/v0/builds/${buildID}`, options);
+  }
+  /**
+   * List builds for a project
+   */
+  list(params = {}, options) {
+    const { project = this._client.project, ...query } = params ?? {};
+    return this._client.getAPIList("/v0/builds", List, {
+      query: { project, ...query },
+      ...options
+    });
+  }
+  /**
+   * Creates two builds whose outputs can be compared directly
+   */
+  compare(params, options) {
+    const { project = this._client.project, ...body } = params;
+    return this._client.post("/v0/builds/compare", { body: { project, ...body }, ...options });
+  }
+};
+Builds.Diagnostics = Diagnostics;
+Builds.TargetOutputs = TargetOutputs;
+
+// node_modules/@stainless-api/sdk/resources/generate.mjs
+var Generate = class extends APIResource {
+  createSpec(params, options) {
+    const { project = this._client.project, ...body } = params;
+    return this._client.post("/v0/generate/spec", { body: { project, ...body }, ...options });
+  }
+};
+
+// node_modules/@stainless-api/sdk/resources/orgs.mjs
+var Orgs = class extends APIResource {
+  /**
+   * Retrieve an organization by name
+   */
+  retrieve(org, options) {
+    return this._client.get(path`/v0/orgs/${org}`, options);
+  }
+  /**
+   * List organizations the user has access to
+   */
+  list(options) {
+    return this._client.get("/v0/orgs", options);
+  }
+};
+
+// node_modules/@stainless-api/sdk/resources/projects/branches.mjs
+var Branches = class extends APIResource {
+  /**
+   * Create a new branch for a project
+   */
+  create(params, options) {
+    const { project = this._client.project, ...body } = params;
+    return this._client.post(path`/v0/projects/${project}/branches`, { body, ...options });
+  }
+  /**
+   * Retrieve a project branch
+   */
+  retrieve(branch, params = {}, options) {
+    const { project = this._client.project } = params ?? {};
+    return this._client.get(path`/v0/projects/${project}/branches/${branch}`, options);
+  }
+};
+
+// node_modules/@stainless-api/sdk/resources/projects/configs.mjs
+var Configs = class extends APIResource {
+  /**
+   * Retrieve configuration files for a project
+   */
+  retrieve(params = {}, options) {
+    const { project = this._client.project, ...query } = params ?? {};
+    return this._client.get(path`/v0/projects/${project}/configs`, { query, ...options });
+  }
+  /**
+   * Generate configuration suggestions based on an OpenAPI spec
+   */
+  guess(params, options) {
+    const { project = this._client.project, ...body } = params;
+    return this._client.post(path`/v0/projects/${project}/configs/guess`, { body, ...options });
+  }
+};
+
+// node_modules/@stainless-api/sdk/resources/projects/projects.mjs
+var Projects = class extends APIResource {
+  constructor() {
+    super(...arguments);
+    this.branches = new Branches(this._client);
+    this.configs = new Configs(this._client);
+  }
+  /**
+   * Create a new project
+   */
+  create(body, options) {
+    return this._client.post("/v0/projects", { body, ...options });
+  }
+  /**
+   * Retrieve a project by name
+   */
+  retrieve(params = {}, options) {
+    const { project = this._client.project } = params ?? {};
+    return this._client.get(path`/v0/projects/${project}`, options);
+  }
+  /**
+   * Update a project's properties
+   */
+  update(params = {}, options) {
+    const { project = this._client.project, ...body } = params ?? {};
+    return this._client.patch(path`/v0/projects/${project}`, { body, ...options });
+  }
+  /**
+   * List projects in an organization
+   */
+  list(query = {}, options) {
+    return this._client.getAPIList("/v0/projects", List, { query, ...options });
+  }
+};
+Projects.Branches = Branches;
+Projects.Configs = Configs;
+
+// node_modules/@stainless-api/sdk/internal/headers.mjs
+var brand_privateNullableHeaders = /* @__PURE__ */ Symbol("brand.privateNullableHeaders");
 function* iterateHeaders(headers) {
   if (!headers)
     return;
@@ -20990,7 +21108,7 @@ function* iterateHeaders(headers) {
   let iter;
   if (headers instanceof Headers) {
     iter = headers.entries();
-  } else if (isArray(headers)) {
+  } else if (isReadonlyArray(headers)) {
     iter = headers;
   } else {
     shouldClear = true;
@@ -21000,7 +21118,7 @@ function* iterateHeaders(headers) {
     const name = row[0];
     if (typeof name !== "string")
       throw new TypeError("expected header name to be a string");
-    const values = isArray(row[1]) ? row[1] : [row[1]];
+    const values = isReadonlyArray(row[1]) ? row[1] : [row[1]];
     let didClear = false;
     for (const value of values) {
       if (value === void 0)
@@ -21036,7 +21154,7 @@ var buildHeaders = (newHeaders) => {
   return { [brand_privateNullableHeaders]: true, values: targetHeaders, nulls: nullHeaders };
 };
 
-// node_modules/stainless/internal/utils/env.mjs
+// node_modules/@stainless-api/sdk/internal/utils/env.mjs
 var readEnv = (env) => {
   if (typeof globalThis.process !== "undefined") {
     return globalThis.process.env?.[env]?.trim() ?? void 0;
@@ -21047,15 +21165,34 @@ var readEnv = (env) => {
   return void 0;
 };
 
-// node_modules/stainless/client.mjs
+// node_modules/@stainless-api/sdk/lib/unwrap.mjs
+async function unwrapFile(value) {
+  if (value === null) {
+    return null;
+  }
+  if (value.type === "content") {
+    return value.content;
+  }
+  const response = await fetch(value.url);
+  return response.text();
+}
+
+// node_modules/@stainless-api/sdk/client.mjs
+var _Stainless_instances;
 var _a;
 var _Stainless_encoder;
+var _Stainless_baseURLOverridden;
+var environments = {
+  production: "https://api.stainless.com",
+  staging: "https://staging.stainless.com"
+};
 var Stainless = class {
   /**
    * API Client for interfacing with the Stainless API.
    *
-   * @param {string | null | undefined} [opts.apiKey=process.env['STAINLESS_V0_API_KEY'] ?? null]
-   * @param {string} opts.project
+   * @param {string | null | undefined} [opts.apiKey=process.env['STAINLESS_API_KEY'] ?? null]
+   * @param {string | null | undefined} [opts.project]
+   * @param {Environment} [opts.environment=production] - Specifies the environment URL to use for the API.
    * @param {string} [opts.baseURL=process.env['STAINLESS_BASE_URL'] ?? https://api.stainless.com] - Override the default base URL for the API.
    * @param {number} [opts.timeout=1 minute] - The maximum amount of time (in milliseconds) the client will wait for a response before timing out.
    * @param {MergedRequestInit} [opts.fetchOptions] - Additional `RequestInit` options to be passed to `fetch` calls.
@@ -21064,21 +21201,24 @@ var Stainless = class {
    * @param {HeadersLike} opts.defaultHeaders - Default headers to include with every request to the API.
    * @param {Record<string, string | undefined>} opts.defaultQuery - Default query parameters to include with every request to the API.
    */
-  constructor({ baseURL = readEnv("STAINLESS_BASE_URL"), apiKey = readEnv("STAINLESS_V0_API_KEY") ?? null, project, ...opts }) {
+  constructor({ baseURL = readEnv("STAINLESS_BASE_URL"), apiKey = readEnv("STAINLESS_API_KEY") ?? null, project = null, ...opts } = {}) {
+    _Stainless_instances.add(this);
     _Stainless_encoder.set(this, void 0);
     this.projects = new Projects(this);
     this.builds = new Builds(this);
     this.orgs = new Orgs(this);
-    if (project === void 0) {
-      throw new StainlessError("Missing required client option project; you need to instantiate the Stainless client with an project option, like new Stainless({ project: 'example-project' }).");
-    }
+    this.generate = new Generate(this);
     const options = {
       apiKey,
       project,
       ...opts,
-      baseURL: baseURL || `https://api.stainless.com`
+      baseURL,
+      environment: opts.environment ?? "production"
     };
-    this.baseURL = options.baseURL;
+    if (baseURL && opts.environment) {
+      throw new StainlessError("Ambiguous URL; The `baseURL` option (or STAINLESS_BASE_URL env var) and the `environment` option are given. If you want to use the environment you must pass baseURL: null");
+    }
+    this.baseURL = options.baseURL || environments[options.environment || "production"];
     this.timeout = options.timeout ?? _a.DEFAULT_TIMEOUT;
     this.logger = options.logger ?? console;
     const defaultLogLevel = "warn";
@@ -21098,11 +21238,13 @@ var Stainless = class {
   withOptions(options) {
     return new this.constructor({
       ...this._options,
-      baseURL: this.baseURL,
+      environment: options.environment ? options.environment : void 0,
+      baseURL: options.environment ? void 0 : this.baseURL,
       maxRetries: this.maxRetries,
       timeout: this.timeout,
       logger: this.logger,
       logLevel: this.logLevel,
+      fetch: this.fetch,
       fetchOptions: this.fetchOptions,
       apiKey: this.apiKey,
       project: this.project,
@@ -21139,8 +21281,9 @@ var Stainless = class {
   makeStatusError(status, error, message, headers) {
     return APIError.generate(status, error, message, headers);
   }
-  buildURL(path2, query) {
-    const url = isAbsoluteURL(path2) ? new URL(path2) : new URL(this.baseURL + (this.baseURL.endsWith("/") && path2.startsWith("/") ? path2.slice(1) : path2));
+  buildURL(path2, query, defaultBaseURL) {
+    const baseURL = !__classPrivateFieldGet(this, _Stainless_instances, "m", _Stainless_baseURLOverridden).call(this) && defaultBaseURL || this.baseURL;
+    const url = isAbsoluteURL(path2) ? new URL(path2) : new URL(baseURL + (baseURL.endsWith("/") && path2.startsWith("/") ? path2.slice(1) : path2));
     const defaultQuery = this.defaultQuery();
     if (!isEmptyObj(defaultQuery)) {
       query = { ...defaultQuery, ...query };
@@ -21281,6 +21424,13 @@ var Stainless = class {
     }));
     return { response, options, controller, requestLogID, retryOfRequestLogID, startTime };
   }
+  getAPIList(path2, Page, opts) {
+    return this.requestAPIList(Page, { method: "get", path: path2, ...opts });
+  }
+  requestAPIList(Page, options) {
+    const request = this.makeRequest(options, null, void 0);
+    return new PagePromise(this, request, Page);
+  }
   async fetchWithTimeout(url, init, ms, controller) {
     const { signal, method, ...options } = init || {};
     if (signal)
@@ -21353,8 +21503,8 @@ var Stainless = class {
   }
   buildRequest(inputOptions, { retryCount = 0 } = {}) {
     const options = { ...inputOptions };
-    const { method, path: path2, query } = options;
-    const url = this.buildURL(path2, query);
+    const { method, path: path2, query, defaultBaseURL } = options;
+    const url = this.buildURL(path2, query, defaultBaseURL);
     if ("timeout" in options)
       validatePositiveInteger("timeout", options.timeout);
     options.timeout = options.timeout ?? this.timeout;
@@ -21417,7 +21567,9 @@ var Stainless = class {
     }
   }
 };
-_a = Stainless, _Stainless_encoder = /* @__PURE__ */ new WeakMap();
+_a = Stainless, _Stainless_encoder = /* @__PURE__ */ new WeakMap(), _Stainless_instances = /* @__PURE__ */ new WeakSet(), _Stainless_baseURLOverridden = function _Stainless_baseURLOverridden2() {
+  return this.baseURL !== environments[this._options.environment || "production"];
+};
 Stainless.Stainless = _a;
 Stainless.DEFAULT_TIMEOUT = 6e4;
 Stainless.StainlessError = StainlessError;
@@ -21434,9 +21586,11 @@ Stainless.InternalServerError = InternalServerError;
 Stainless.PermissionDeniedError = PermissionDeniedError;
 Stainless.UnprocessableEntityError = UnprocessableEntityError;
 Stainless.toFile = toFile;
+Stainless.unwrapFile = unwrapFile;
 Stainless.Projects = Projects;
 Stainless.Builds = Builds;
 Stainless.Orgs = Orgs;
+Stainless.Generate = Generate;
 
 // src/build.ts
 var fs = __toESM(require("fs"));
@@ -21637,8 +21791,8 @@ async function pollBuild({
         }
       }
     }
-    if (!documentedSpec && build2.documented_spec?.type === "content") {
-      documentedSpec = build2.documented_spec.content;
+    if (!documentedSpec && build2.documented_spec) {
+      documentedSpec = await Stainless.unwrapFile(build2.documented_spec);
     }
     await new Promise(
       (resolve) => setTimeout(resolve, pollingIntervalSeconds * 1e3)
@@ -21687,8 +21841,16 @@ async function main() {
     const baseRevision = (0, import_core.getInput)("base_revision", { required: false }) || void 0;
     const baseBranch = (0, import_core.getInput)("base_branch", { required: false }) || void 0;
     const outputDir = (0, import_core.getInput)("output_dir", { required: false }) || void 0;
-    const stainless = new Stainless({ project: projectName, apiKey, logLevel: "warn" });
-    for await (const { baseOutcomes, outcomes, documentedSpecPath } of runBuilds({
+    const stainless = new Stainless({
+      project: projectName,
+      apiKey,
+      logLevel: "warn"
+    });
+    for await (const {
+      baseOutcomes,
+      outcomes,
+      documentedSpecPath
+    } of runBuilds({
       stainless,
       projectName,
       baseRevision,
