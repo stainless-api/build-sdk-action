@@ -1,5 +1,5 @@
 import { getBooleanInput, getInput, setOutput } from "@actions/core";
-import {  Stainless } from "stainless";
+import { Stainless } from "@stainless-api/sdk";
 import { runBuilds } from "./build";
 
 async function main() {
@@ -21,9 +21,17 @@ async function main() {
       getInput("base_branch", { required: false }) || undefined;
     const outputDir = getInput("output_dir", { required: false }) || undefined;
 
-    const stainless = new Stainless({ project: projectName, apiKey, logLevel: "warn" });
+    const stainless = new Stainless({
+      project: projectName,
+      apiKey,
+      logLevel: "warn",
+    });
 
-    for await (const { baseOutcomes, outcomes, documentedSpecPath } of runBuilds({
+    for await (const {
+      baseOutcomes,
+      outcomes,
+      documentedSpecPath,
+    } of runBuilds({
       stainless,
       projectName,
       baseRevision,

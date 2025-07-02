@@ -5,7 +5,7 @@ import {
   setOutput,
   startGroup,
 } from "@actions/core";
-import { Stainless } from "stainless";
+import { Stainless } from "@stainless-api/sdk";
 import { isConfigChanged } from "./config";
 import { checkResults, runBuilds } from "./build";
 import { generateMergeComment, upsertComment } from "./comment";
@@ -38,7 +38,11 @@ async function main() {
       return;
     }
 
-    const stainless = new Stainless({ project: projectName, apiKey, logLevel: "warn" });
+    const stainless = new Stainless({
+      project: projectName,
+      apiKey,
+      logLevel: "warn",
+    });
 
     const configChanged = await isConfigChanged({
       before: baseSha,
@@ -61,11 +65,11 @@ async function main() {
       mergeBranch,
       guessConfig: false,
       outputDir,
-    })
+    });
 
-  let latestRun;
+    let latestRun;
 
-   while (true) {
+    while (true) {
       startGroup("Running builds");
 
       const run = await generator.next();

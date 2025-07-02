@@ -1,5 +1,5 @@
 import * as fs from "fs";
-import { Stainless } from "stainless";
+import { Stainless } from "@stainless-api/sdk";
 
 type Build = Stainless.Builds.BuildObject;
 export type Outcomes = Record<
@@ -260,9 +260,8 @@ async function pollBuild({
       }
     }
 
-    // TODO: API only returns "content" for now; need to support "url" in the future
-    if (!documentedSpec && build.documented_spec?.type === "content") {
-      documentedSpec = build.documented_spec.content;
+    if (!documentedSpec && build.documented_spec) {
+      documentedSpec = await Stainless.unwrapFile(build.documented_spec);
     }
 
     // wait a bit before polling again

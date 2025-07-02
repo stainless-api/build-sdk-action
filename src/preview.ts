@@ -6,7 +6,7 @@ import {
   startGroup,
 } from "@actions/core";
 import * as exec from "@actions/exec";
-import { Stainless } from "stainless";
+import { Stainless } from "@stainless-api/sdk";
 import { checkResults, runBuilds } from "./build";
 import { isConfigChanged } from "./config";
 import { generatePreviewComment, upsertComment } from "./comment";
