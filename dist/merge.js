@@ -25775,7 +25775,9 @@ function checkResults({
     return true;
   }
   const failedLanguages = Object.entries(outcomes).filter(([_, outcome]) => {
-    if (!outcome.commit) return true;
+    if (!outcome.commit || outcome.commit.completed.conclusion === "noop") {
+      return true;
+    }
     if (failRunOn === "error" || failRunOn === "warning" || failRunOn === "note") {
       if (outcome.commit.completed.conclusion === "error") return true;
     }
