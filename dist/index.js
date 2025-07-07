@@ -20005,7 +20005,7 @@ var safeJSON = (text) => {
 var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // node_modules/@stainless-api/sdk/version.mjs
-var VERSION = "0.1.0-alpha.10";
+var VERSION = "0.1.0-alpha.11";
 
 // node_modules/@stainless-api/sdk/internal/detect-platform.mjs
 function getDetectedPlatform() {
@@ -20758,8 +20758,8 @@ var AbstractPage = class {
   }
 };
 var PagePromise = class extends APIPromise {
-  constructor(client, request, Page) {
-    super(client, request, async (client2, props) => new Page(client2, props.response, await defaultParseResponse(client2, props), props.options));
+  constructor(client, request, Page2) {
+    super(client, request, async (client2, props) => new Page2(client2, props.response, await defaultParseResponse(client2, props), props.options));
   }
   /**
    * Allow auto-paginating iteration on an unawaited list call, eg:
@@ -20775,7 +20775,7 @@ var PagePromise = class extends APIPromise {
     }
   }
 };
-var List = class extends AbstractPage {
+var Page = class extends AbstractPage {
   constructor(client, response, body, options) {
     super(client, response, body, options);
     this.data = body.data || [];
@@ -20936,7 +20936,7 @@ var Diagnostics = class extends APIResource {
    * Get diagnostics for a build
    */
   list(buildID, query = {}, options) {
-    return this._client.getAPIList(path`/v0/builds/${buildID}/diagnostics`, List, {
+    return this._client.getAPIList(path`/v0/builds/${buildID}/diagnostics`, Page, {
       query,
       ...options
     });
@@ -20978,7 +20978,7 @@ var Builds = class extends APIResource {
    */
   list(params = {}, options) {
     const { project = this._client.project, ...query } = params ?? {};
-    return this._client.getAPIList("/v0/builds", List, {
+    return this._client.getAPIList("/v0/builds", Page, {
       query: { project, ...query },
       ...options
     });
@@ -21082,10 +21082,10 @@ var Projects = class extends APIResource {
     return this._client.patch(path`/v0/projects/${project}`, { body, ...options });
   }
   /**
-   * List projects in an organization
+   * List projects in an organization, from oldest to newest
    */
   list(query = {}, options) {
-    return this._client.getAPIList("/v0/projects", List, { query, ...options });
+    return this._client.getAPIList("/v0/projects", Page, { query, ...options });
   }
 };
 Projects.Branches = Branches;
@@ -21182,17 +21182,12 @@ var _Stainless_instances;
 var _a;
 var _Stainless_encoder;
 var _Stainless_baseURLOverridden;
-var environments = {
-  production: "https://api.stainless.com",
-  staging: "https://staging.stainless.com"
-};
 var Stainless = class {
   /**
    * API Client for interfacing with the Stainless API.
    *
    * @param {string | null | undefined} [opts.apiKey=process.env['STAINLESS_API_KEY'] ?? null]
    * @param {string | null | undefined} [opts.project]
-   * @param {Environment} [opts.environment=production] - Specifies the environment URL to use for the API.
    * @param {string} [opts.baseURL=process.env['STAINLESS_BASE_URL'] ?? https://api.stainless.com] - Override the default base URL for the API.
    * @param {number} [opts.timeout=1 minute] - The maximum amount of time (in milliseconds) the client will wait for a response before timing out.
    * @param {MergedRequestInit} [opts.fetchOptions] - Additional `RequestInit` options to be passed to `fetch` calls.
@@ -21212,13 +21207,9 @@ var Stainless = class {
       apiKey,
       project,
       ...opts,
-      baseURL,
-      environment: opts.environment ?? "production"
+      baseURL: baseURL || `https://api.stainless.com`
     };
-    if (baseURL && opts.environment) {
-      throw new StainlessError("Ambiguous URL; The `baseURL` option (or STAINLESS_BASE_URL env var) and the `environment` option are given. If you want to use the environment you must pass baseURL: null");
-    }
-    this.baseURL = options.baseURL || environments[options.environment || "production"];
+    this.baseURL = options.baseURL;
     this.timeout = options.timeout ?? _a.DEFAULT_TIMEOUT;
     this.logger = options.logger ?? console;
     const defaultLogLevel = "warn";
@@ -21238,8 +21229,7 @@ var Stainless = class {
   withOptions(options) {
     return new this.constructor({
       ...this._options,
-      environment: options.environment ? options.environment : void 0,
-      baseURL: options.environment ? void 0 : this.baseURL,
+      baseURL: this.baseURL,
       maxRetries: this.maxRetries,
       timeout: this.timeout,
       logger: this.logger,
@@ -21424,12 +21414,12 @@ var Stainless = class {
     }));
     return { response, options, controller, requestLogID, retryOfRequestLogID, startTime };
   }
-  getAPIList(path2, Page, opts) {
-    return this.requestAPIList(Page, { method: "get", path: path2, ...opts });
+  getAPIList(path2, Page2, opts) {
+    return this.requestAPIList(Page2, { method: "get", path: path2, ...opts });
   }
-  requestAPIList(Page, options) {
+  requestAPIList(Page2, options) {
     const request = this.makeRequest(options, null, void 0);
-    return new PagePromise(this, request, Page);
+    return new PagePromise(this, request, Page2);
   }
   async fetchWithTimeout(url, init, ms, controller) {
     const { signal, method, ...options } = init || {};
@@ -21568,7 +21558,7 @@ var Stainless = class {
   }
 };
 _a = Stainless, _Stainless_encoder = /* @__PURE__ */ new WeakMap(), _Stainless_instances = /* @__PURE__ */ new WeakSet(), _Stainless_baseURLOverridden = function _Stainless_baseURLOverridden2() {
-  return this.baseURL !== environments[this._options.environment || "production"];
+  return this.baseURL !== "https://api.stainless.com";
 };
 Stainless.Stainless = _a;
 Stainless.DEFAULT_TIMEOUT = 6e4;
@@ -21787,7 +21777,24 @@ async function pollBuild({
             `[${buildId}] Build has output:`,
             JSON.stringify(buildOutput)
           );
-          outcomes[language] = { ...buildOutput, commit: buildOutput.commit };
+          const diagnostics = [];
+          try {
+            for await (const diagnostic of stainless.builds.diagnostics.list(
+              buildId
+            )) {
+              diagnostics.push(diagnostic);
+            }
+          } catch (e) {
+            console.error(
+              `[${buildId}] Error getting diagnostics, continuing anyway`,
+              e
+            );
+          }
+          outcomes[language] = {
+            ...buildOutput,
+            commit: buildOutput.commit,
+            diagnostics
+          };
         }
       }
     }
@@ -21819,9 +21826,11 @@ async function pollBuild({
         completed: {
           conclusion: "timed_out",
           commit: null,
-          merge_conflict_pr: null
+          merge_conflict_pr: null,
+          url: null
         }
-      }
+      },
+      diagnostics: []
     };
   }
   return { outcomes, documentedSpec };
