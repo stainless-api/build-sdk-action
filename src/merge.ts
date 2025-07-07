@@ -8,7 +8,7 @@ import {
 import { Stainless } from "@stainless-api/sdk";
 import { isConfigChanged } from "./config";
 import { checkResults, runBuilds } from "./build";
-import { generateMergeComment, upsertComment } from "./comment";
+import { printComment, upsertComment } from "./comment";
 
 async function main() {
   try {
@@ -96,10 +96,12 @@ async function main() {
 
         startGroup("Updating comment");
 
-        const commentBody = generateMergeComment({
-          outcomes,
+        const commentBody = printComment({
           orgName,
           projectName,
+          branch: "main",
+          commitMessage,
+          outcomes,
         });
 
         await upsertComment({ body: commentBody, token: githubToken });

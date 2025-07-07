@@ -10,7 +10,7 @@ import * as github from "@actions/github";
 import { Stainless } from "@stainless-api/sdk";
 import { checkResults, runBuilds } from "./build";
 import { isConfigChanged } from "./config";
-import { generatePreviewComment, upsertComment } from "./comment";
+import { printComment, upsertComment } from "./comment";
 
 async function main() {
   try {
@@ -66,7 +66,7 @@ async function main() {
       ) {
         startGroup("Updating comment");
 
-        const commentBody = generatePreviewComment({ noChanges: true });
+        const commentBody = printComment({ noChanges: true });
 
         await upsertComment({
           body: commentBody,
@@ -135,11 +135,13 @@ async function main() {
 
         startGroup("Updating comment");
 
-        const commentBody = generatePreviewComment({
-          outcomes,
-          baseOutcomes,
+        const commentBody = printComment({
           orgName,
           projectName,
+          branch,
+          commitMessage,
+          outcomes,
+          baseOutcomes,
         });
 
         await upsertComment({ body: commentBody, token: githubToken });

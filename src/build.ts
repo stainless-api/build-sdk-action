@@ -6,6 +6,7 @@ export type Outcomes = Record<
   string,
   Exclude<Stainless.Builds.BuildTarget, "commit"> & {
     commit: Stainless.Builds.BuildTarget.Completed | null;
+    diagnostics: Stainless.Builds.Diagnostics.DiagnosticListResponse[];
   }
 >;
 
@@ -255,7 +256,26 @@ async function pollBuild({
             `[${buildId}] Build has output:`,
             JSON.stringify(buildOutput),
           );
-          outcomes[language] = { ...buildOutput, commit: buildOutput.commit };
+
+          const diagnostics = [];
+          try {
+            for await (const diagnostic of stainless.builds.diagnostics.list(
+              buildId,
+            )) {
+              diagnostics.push(diagnostic);
+            }
+          } catch (e) {
+            console.error(
+              `[${buildId}] Error getting diagnostics, continuing anyway`,
+              e,
+            );
+          }
+
+          outcomes[language] = {
+            ...buildOutput,
+            commit: buildOutput.commit,
+            diagnostics,
+          };
         }
       }
     }
@@ -292,8 +312,10 @@ async function pollBuild({
           conclusion: "timed_out",
           commit: null,
           merge_conflict_pr: null,
+          url: null,
         },
       },
+      diagnostics: [],
     };
   }
 
