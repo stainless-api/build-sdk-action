@@ -1,8 +1,11 @@
+import { dedent as tsdedent } from "ts-dedent";
+
 export const Symbol = {
   Bulb: "💡",
   Exclamation: "❗",
   GreenSquare: "🟩",
   HeavyAsterisk: "✱",
+  HourglassFlowingSand: "⏳",
   MiddleDot: "·",
   RedSquare: "🟥",
   RightwardsArrow: "→",
@@ -19,25 +22,27 @@ export const CodeInline = (content: string) => `<code>${content}</code>`;
 
 export const Italic = (content: string) => `<i>${content}</i>`;
 
-export function Dedent(value: string): string {
-  value = value.replace(/\r?\n([\t ]*)$/, "");
-
-  const indentLengths = value
-    .match(/\n([\t ]+|(?!\s).)/g)
-    ?.map((match) => match.match(/[\t ]/g)?.length ?? 0);
-
-  if (indentLengths && indentLengths.length > 0) {
-    const pattern = new RegExp(`\n[\t ]{${Math.min(...indentLengths)}}`, "g");
-    value = value.replace(pattern, "\n");
-  }
-
-  value = value.replace(/^\r?\n/, "");
-
-  return value;
+export function Dedent(
+  templ: string | TemplateStringsArray,
+  ...args: unknown[]
+): string {
+  return (
+    tsdedent(templ, ...args)
+      .trim()
+      // Wrapping dedent to remove lines that only contain spaces.
+      // Here's the corresponding bug report: https://github.com/tamino-martinius/node-ts-dedent/issues/37
+      .replaceAll(/\n\s*\n/gi, "\n\n")
+  );
 }
 
 export const Blockquote = (content: string) =>
-  `<blockquote>${content}</blockquote>`;
+  Dedent`
+    <blockquote>
+
+    ${content}
+
+    </blockquote>
+  `;
 
 export const CodeBlock = (
   props: string | { content: string; language?: string },
@@ -46,30 +51,32 @@ export const CodeBlock = (
   const content = typeof props === "string" ? props : props.content;
   const language = typeof props === "string" ? "" : props.language;
 
-  return Dedent(`
+  return Dedent`
     ${delimiter}${language}
     ${content}
     ${delimiter}
-  `);
+  `;
 };
 
 export const Details = ({
   summary,
   body,
+  indent = true,
   open = false,
 }: {
   summary: string;
   body: string;
+  indent?: boolean;
   open?: boolean;
 }) => {
-  return Dedent(`
+  return Dedent`
     <details${open ? " open" : ""}>
-      <summary>${summary}</summary>
+    <summary>${summary}</summary>
 
-      ${body}
+    ${indent ? Blockquote(body) : body}
 
     </details>
-  `);
+  `;
 };
 
 export const Heading = (content: string) => `<h3>${content}</h3>`;
@@ -78,11 +85,11 @@ export const Link = ({ text, href }: { text: string; href: string }) =>
   `<a href="${href}">${text}</a>`;
 
 export const List = (lines: string[]) => {
-  return Dedent(`
+  return Dedent`
     <ul>
-    ${lines.map((line) => `  <li>${line}</li>`).join("\n")}
+    ${lines.map((line) => `<li>${line}</li>`).join("\n")}
     </ul>
-  `);
+  `;
 };
 
 export const Rule = () => `<hr />`;

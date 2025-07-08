@@ -47,15 +47,15 @@ export function printComment({
     return [
       printCommitMessage({ commitMessage, projectName }),
       printFailures({ orgName, projectName, branch, outcomes }),
-      printMergeConflicts({ outcomes }),
+      printMergeConflicts({ projectName, outcomes }),
       printRegressions({ orgName, projectName, branch, details }),
       printSuccesses({ orgName, projectName, branch, details }),
     ]
       .filter((f): f is string => f !== null)
-      .join(`\n\n${MD.Rule}\n\n`);
+      .join(`\n\n`);
   })();
 
-  return MD.Dedent(`
+  return MD.Dedent`
     ${MD.Heading(`${MD.Symbol.HeavyAsterisk} Stainless SDK previews`)}
 
     ${MD.Italic(
@@ -66,7 +66,7 @@ export function printComment({
     )}
 
     ${blocks}
-  `);
+  `;
 }
 
 function printCommitMessage({
@@ -76,13 +76,12 @@ function printCommitMessage({
   commitMessage: string;
   projectName: string;
 }) {
-  return MD.Dedent(`
-    ${MD.Symbol.SpeechBalloon} This PR updates ${MD.CodeInline(projectName)}
-    SDKs with this commit message. To change the commit message, edit this
-    comment.
+  // TODO: support editing comment to change commit message
+  return MD.Dedent`
+    ${MD.Symbol.SpeechBalloon} This PR updates ${MD.CodeInline(projectName)} SDKs with this commit message.
 
     ${MD.CodeBlock(commitMessage)}
-  `);
+  `;
 }
 
 function printFailures({
@@ -133,16 +132,22 @@ function printFailures({
   const studioURL = getStudioURL({ orgName, projectName, branch });
   const studioLink = MD.Link({ text: "Stainless Studio", href: studioURL });
 
-  return MD.Dedent(`
-    ${MD.Symbol.Exclamation} Failures. See the ${studioLink} for details.
+  return MD.Dedent`
+    ${MD.Symbol.Exclamation} ${MD.Bold("Failures.")} See the ${studioLink} for details.
 
     ${MD.List(
-      failures.map(([lang, message]) => `${MD.Bold(lang)}: ${message}`),
+      failures.map(([lang, message]) => `${projectName}-${lang}: ${message}`),
     )}
-  `);
+  `;
 }
 
-function printMergeConflicts({ outcomes }: { outcomes: Outcomes }) {
+function printMergeConflicts({
+  projectName,
+  outcomes,
+}: {
+  projectName: string;
+  outcomes: Outcomes;
+}) {
   const mergeConflicts = Object.entries(outcomes)
     .map<[string, string] | null>(([lang, outcome]) => {
       if (!outcome.commit.completed.merge_conflict_pr) {
@@ -168,14 +173,11 @@ function printMergeConflicts({ outcomes }: { outcomes: Outcomes }) {
   }
 
   const runURL = `https://github.com/${github.context.repo.owner}/${github.context.repo.repo}/actions/runs/${github.context.runId}`;
-  return MD.Dedent(`
-    ${MD.Symbol.Zap} Merge conflicts. You can resolve conflicts now; if you do,
-    ${MD.Link({ text: "re-run this GitHub action", href: runURL })} to get
-    diffs. If you merge before resolving conflicts, new conflicts will be
-    created after merging.
+  return MD.Dedent`
+    ${MD.Symbol.Zap} ${MD.Bold("Merge conflicts.")} You can resolve conflicts now; if you do, ${MD.Link({ text: "re-run this GitHub action", href: runURL })} to get diffs. If you merge before resolving conflicts, new conflicts will be created after merging.
 
-    ${MD.List(mergeConflicts.map(([lang, message]) => `${MD.Bold(lang)}: ${message}`))}
-  `);
+    ${MD.List(mergeConflicts.map(([lang, message]) => `${projectName}-${lang}: ${message}`))}
+  `;
 }
 
 type Details = Record<
@@ -184,7 +186,7 @@ type Details = Record<
     githubLink: string | null;
     compareLink: string | null;
     details: string[];
-    hasRegression: boolean;
+    status: "success" | "pending" | "regression";
   }
 >;
 
@@ -198,9 +200,17 @@ function getDetails({
   const result: Details = {};
 
   for (const [lang, outcome] of Object.entries(head)) {
-    const details = [];
+    if (
+      !["error", "warning", "note", "success"].includes(
+        outcome.commit.completed.conclusion,
+      )
+    ) {
+      continue;
+    }
+
+    const details: string[] = [];
     const baseOutcome = base?.[lang];
-    let hasRegression = false;
+    let status: "success" | "pending" | "regression" = "success";
     let githubLink: string | null = null;
     let compareLink: string | null = null;
 
@@ -228,24 +238,27 @@ function getDetails({
       compareLink = MD.Link({ text: "diff", href: compareURL });
     }
 
-    // Show a check if it used to succeed and now fails:
+    // Show a check if it fails, but previously succeeded or didn't exist:
     for (const check of ["build", "lint", "test"] as const) {
+      const checkName =
+        check === "build" ? "Build" : check === "lint" ? "Lint" : "Test";
+
       if (
-        baseOutcome?.[check] &&
-        baseOutcome[check].status === "completed" &&
-        baseOutcome[check].completed.conclusion === "success" &&
+        (!baseOutcome?.[check] ||
+          (baseOutcome[check].status === "completed" &&
+            baseOutcome[check].completed.conclusion === "success")) &&
         outcome[check] &&
         outcome[check].status === "completed" &&
         outcome[check].completed.conclusion === "failure"
       ) {
-        const checkName =
-          check === "build" ? "Build" : check === "lint" ? "Lint" : "Test";
-
-        const baseURL = baseOutcome[check].completed.url;
+        const baseURL =
+          baseOutcome?.[check]?.status === "completed"
+            ? baseOutcome[check].completed.url
+            : null;
         const baseText = `${MD.Symbol.WhiteCheckMark} success`;
         const baseLink = baseURL
           ? MD.Link({ text: baseText, href: baseURL })
-          : baseText;
+          : null;
 
         const headURL = outcome[check].completed.url;
         const headText = `${MD.Symbol.Exclamation} failure`;
@@ -253,10 +266,19 @@ function getDetails({
           ? MD.Link({ text: headText, href: headURL })
           : headText;
 
-        details.push(
-          `${checkName}: ${baseLink} ${MD.Symbol.RightwardsArrow} ${headLink}`,
-        );
-        hasRegression = true;
+        if (baseLink) {
+          details.push(
+            `${checkName}: ${baseLink} ${MD.Symbol.RightwardsArrow} ${headLink}`,
+          );
+        } else {
+          details.push(`${checkName}: ${headLink}`);
+        }
+        status = "regression";
+      }
+
+      if (outcome[check] && outcome[check].status !== "completed") {
+        details.push(`${checkName}: ${MD.Symbol.HourglassFlowingSand} pending`);
+        status = "pending";
       }
     }
 
@@ -287,7 +309,7 @@ function getDetails({
         }
 
         if (levelCounts.fatal > 0 || levelCounts.error > 0) {
-          hasRegression = true;
+          status = "regression";
         }
 
         const diagnosticCounts = Object.entries(levelCounts)
@@ -309,12 +331,11 @@ function getDetails({
         details.push(
           MD.Details({
             summary: `New diagnostics (${diagnosticCounts.join(", ")})`,
-            body: MD.Dedent(`
-              ${hasOmittedDiagnostics ? "Some diagnostics omitted." : ""}
-              See the Stainless Studio for more details.
+            body: MD.Dedent`
+              ${hasOmittedDiagnostics ? "Some diagnostics omitted. " : ""}See the Stainless Studio for more details.
 
               ${MD.List(diagnosticList)}
-            `),
+            `,
           }),
         );
       }
@@ -327,6 +348,7 @@ function getDetails({
         MD.Details({
           summary: "Installation",
           body: MD.CodeBlock({ content: installation, language: "bash" }),
+          indent: false,
         }),
       );
     }
@@ -335,7 +357,7 @@ function getDetails({
       githubLink,
       compareLink,
       details,
-      hasRegression,
+      status,
     };
   }
 
@@ -354,7 +376,7 @@ function printRegressions({
   details: Details;
 }) {
   const regressions = Object.entries(details).filter(
-    ([, { hasRegression }]) => hasRegression,
+    ([, { status }]) => status === "regression",
   );
 
   if (regressions.length === 0) {
@@ -376,18 +398,18 @@ function printRegressions({
         .join(` ${MD.Symbol.MiddleDot} `);
 
       return MD.Details({
-        summary: `${MD.Bold(lang)}: ${headingLinks}`,
-        body: MD.Blockquote(MD.List(details)),
+        summary: `${projectName}-${lang}: ${headingLinks}`,
+        body: details.join("\n\n"),
         open: true,
       });
     },
   );
 
-  return MD.Dedent(`
-    ${MD.Symbol.Warning} Regressions.
+  return MD.Dedent`
+    ${MD.Symbol.Warning} ${MD.Bold("Regressions.")}
 
     ${formattedRegressions.join("\n\n")}
-  `);
+  `;
 }
 
 function printSuccesses({
@@ -402,7 +424,7 @@ function printSuccesses({
   details: Details;
 }) {
   const successes = Object.entries(details).filter(
-    ([, { hasRegression }]) => !hasRegression,
+    ([, { status }]) => status === "success",
   );
 
   if (successes.length === 0) {
@@ -422,20 +444,19 @@ function printSuccesses({
       const headingLinks = [studioLink, githubLink, compareLink]
         .filter((link): link is string => link !== null)
         .join(` ${MD.Symbol.MiddleDot} `);
+      const summary = `${projectName}-${lang}: ${headingLinks}`;
 
-      return MD.Details({
-        summary: `${MD.Bold(lang)}: ${headingLinks}`,
-        body: MD.Blockquote(MD.List(details)),
-        open: false,
-      });
+      return details.length > 0
+        ? MD.Details({ summary, body: details.join("\n\n") })
+        : `- ${summary}`;
     },
   );
 
-  return MD.Dedent(`
-    ${MD.Symbol.WhiteCheckMark} Successes.
+  return MD.Dedent`
+    ${MD.Symbol.WhiteCheckMark} ${MD.Bold("Successes.")}
 
     ${formattedSuccesses.join("\n\n")}
-  `);
+  `;
 }
 
 function getInstallation(lang: string, outcome: Outcomes[string]) {
