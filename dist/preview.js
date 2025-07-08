@@ -33450,16 +33450,14 @@ function getInstallation(lang, outcome) {
   if (!outcome.commit.completed.commit) {
     return null;
   }
-  const { repo, sha } = outcome.commit.completed.commit;
-  const build = outcome.build;
-  const installVia = build?.status === "completed" && build.completed.conclusion === "success" ? "pkg" : "github";
+  const { repo } = outcome.commit.completed.commit;
   switch (lang) {
     case "typescript":
     case "node": {
-      return installVia === "pkg" ? `npm install ${getPkgStainlessURL({ repo, sha })}` : `npm install ${getGitHubURL({ repo })}`;
+      return `npm install ${getGitHubURL({ repo })}`;
     }
     case "python": {
-      return installVia === "pkg" ? `pip install ${getPkgStainlessURL({ repo, sha })}` : `pip install git+${getGitHubURL({ repo })}`;
+      return `pip install git+${getGitHubURL({ repo })}`;
     }
     default: {
       return null;
@@ -33470,12 +33468,6 @@ function getGitHubURL({
   repo
 }) {
   return `https://github.com/${repo.owner}/${repo.name}.git#${repo.branch}`;
-}
-function getPkgStainlessURL({
-  repo,
-  sha
-}) {
-  return `https://pkg.stainless.com/s/${repo.name}/${sha}`;
 }
 function getStudioURL({
   orgName,
