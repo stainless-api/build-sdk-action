@@ -50,6 +50,7 @@ export function printComment({
       printMergeConflicts({ projectName, outcomes }),
       printRegressions({ orgName, projectName, branch, details }),
       printSuccesses({ orgName, projectName, branch, details }),
+      printPending({ details }),
     ]
       .filter((f): f is string => f !== null)
       .join(`\n\n`);
@@ -185,7 +186,8 @@ type Details = Record<
     githubLink: string | null;
     compareLink: string | null;
     details: string[];
-    status: "success" | "pending" | "regression";
+    isPending: boolean;
+    isRegression: boolean;
   }
 >;
 
@@ -209,9 +211,10 @@ function getDetails({
 
     const details: string[] = [];
     const baseOutcome = base?.[lang];
-    let status: "success" | "pending" | "regression" = "success";
     let githubLink: string | null = null;
     let compareLink: string | null = null;
+    let isPending = false;
+    let isRegression = false;
 
     // Get the GitHub link:
     if (outcome.commit.completed.commit) {
@@ -272,17 +275,18 @@ function getDetails({
         } else {
           details.push(`${checkName}: ${headLink}`);
         }
-        status = "regression";
+
+        isRegression = true;
       }
 
       if (outcome[check] && outcome[check].status !== "completed") {
         details.push(`${checkName}: ${MD.Symbol.HourglassFlowingSand} pending`);
-        status = "pending";
+        isPending = true;
       }
     }
 
     // New diagnostics. Show count of every severity, but only show the details
-    // of the first few diagnostics. Regression if we have a new fatal or error
+    // of the first few diagnostics. Regression if we have a new non-info
     // diagnostic.
     if (baseOutcome?.diagnostics && outcome.diagnostics) {
       const newDiagnostics = outcome.diagnostics.filter(
@@ -307,8 +311,12 @@ function getDetails({
           levelCounts[d.level]++;
         }
 
-        if (levelCounts.fatal > 0 || levelCounts.error > 0) {
-          status = "regression";
+        if (
+          levelCounts.fatal > 0 ||
+          levelCounts.error > 0 ||
+          levelCounts.warning > 0
+        ) {
+          isRegression = true;
         }
 
         const diagnosticCounts = Object.entries(levelCounts)
@@ -356,7 +364,8 @@ function getDetails({
       githubLink,
       compareLink,
       details,
-      status,
+      isPending,
+      isRegression,
     };
   }
 
@@ -375,7 +384,7 @@ function printRegressions({
   details: Details;
 }) {
   const regressions = Object.entries(details).filter(
-    ([, { status }]) => status === "regression",
+    ([, { isRegression }]) => isRegression,
   );
 
   if (regressions.length === 0) {
@@ -423,7 +432,7 @@ function printSuccesses({
   details: Details;
 }) {
   const successes = Object.entries(details).filter(
-    ([, { status }]) => status === "success",
+    ([, { isPending, isRegression }]) => !isPending && !isRegression,
   );
 
   if (successes.length === 0) {
@@ -455,6 +464,20 @@ function printSuccesses({
     ${MD.Symbol.WhiteCheckMark} ${MD.Bold("Successes.")}
 
     ${formattedSuccesses.join("\n\n")}
+  `;
+}
+
+function printPending({ details }: { details: Details }) {
+  const pending = Object.entries(details).filter(
+    ([, { isPending }]) => isPending,
+  );
+
+  if (pending.length === 0) {
+    return null;
+  }
+
+  return MD.Dedent`
+    ${MD.Symbol.HourglassFlowingSand} These are partial results; builds are still running.
   `;
 }
 

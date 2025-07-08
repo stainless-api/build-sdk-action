@@ -33149,7 +33149,8 @@ function printComment({
       printFailures({ orgName, projectName, branch, outcomes }),
       printMergeConflicts({ projectName, outcomes }),
       printRegressions({ orgName, projectName, branch, details }),
-      printSuccesses({ orgName, projectName, branch, details })
+      printSuccesses({ orgName, projectName, branch, details }),
+      printPending({ details })
     ].filter((f) => f !== null).join(`
 
 `);
@@ -33262,9 +33263,10 @@ function getDetails({
     }
     const details = [];
     const baseOutcome = base?.[lang];
-    let status = "success";
     let githubLink = null;
     let compareLink = null;
+    let isPending = false;
+    let isRegression = false;
     if (outcome.commit.completed.commit) {
       const {
         repo: { owner, name, branch }
@@ -33297,11 +33299,11 @@ function getDetails({
         } else {
           details.push(`${checkName}: ${headLink}`);
         }
-        status = "regression";
+        isRegression = true;
       }
       if (outcome[check] && outcome[check].status !== "completed") {
         details.push(`${checkName}: ${Symbol2.HourglassFlowingSand} pending`);
-        status = "pending";
+        isPending = true;
       }
     }
     if (baseOutcome?.diagnostics && outcome.diagnostics) {
@@ -33320,8 +33322,8 @@ function getDetails({
         for (const d of newDiagnostics) {
           levelCounts[d.level]++;
         }
-        if (levelCounts.fatal > 0 || levelCounts.error > 0) {
-          status = "regression";
+        if (levelCounts.fatal > 0 || levelCounts.error > 0 || levelCounts.warning > 0) {
+          isRegression = true;
         }
         const diagnosticCounts = Object.entries(levelCounts).filter(([, count]) => count > 0).map(([level, count]) => `${count} ${level}`);
         let hasOmittedDiagnostics = newDiagnostics.length > 10;
@@ -33358,7 +33360,8 @@ function getDetails({
       githubLink,
       compareLink,
       details,
-      status
+      isPending,
+      isRegression
     };
   }
   return result;
@@ -33370,7 +33373,7 @@ function printRegressions({
   details
 }) {
   const regressions = Object.entries(details).filter(
-    ([, { status }]) => status === "regression"
+    ([, { isRegression }]) => isRegression
   );
   if (regressions.length === 0) {
     return null;
@@ -33405,7 +33408,7 @@ function printSuccesses({
   details
 }) {
   const successes = Object.entries(details).filter(
-    ([, { status }]) => status === "success"
+    ([, { isPending, isRegression }]) => !isPending && !isRegression
   );
   if (successes.length === 0) {
     return null;
@@ -33428,6 +33431,17 @@ function printSuccesses({
     ${Symbol2.WhiteCheckMark} ${Bold("Successes.")}
 
     ${formattedSuccesses.join("\n\n")}
+  `;
+}
+function printPending({ details }) {
+  const pending = Object.entries(details).filter(
+    ([, { isPending }]) => isPending
+  );
+  if (pending.length === 0) {
+    return null;
+  }
+  return Dedent`
+    ${Symbol2.HourglassFlowingSand} These are partial results; builds are still running.
   `;
 }
 function getInstallation(lang, outcome) {
