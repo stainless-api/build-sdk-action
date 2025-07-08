@@ -108,7 +108,6 @@ function printFailures({
           // non-failures
           return null;
         }
-        case "failure":
         case "fatal": {
           return [lang, `Fatal error.`];
         }
@@ -174,7 +173,7 @@ function printMergeConflicts({
 
   const runURL = `https://github.com/${github.context.repo.owner}/${github.context.repo.repo}/actions/runs/${github.context.runId}`;
   return MD.Dedent`
-    ${MD.Symbol.Zap} ${MD.Bold("Merge conflicts.")} You can resolve conflicts now; if you do, ${MD.Link({ text: "re-run this GitHub action", href: runURL })} to get diffs. If you merge before resolving conflicts, new conflicts will be created after merging.
+    ${MD.Symbol.Zap} ${MD.Bold("Merge conflicts.")} You can resolve conflicts now; if you do, ${MD.Link({ text: "re-run this GitHub action", href: runURL })} to get diffs. If you merge before resolving conflicts, new conflict PRs will be created after merging.
 
     ${MD.List(mergeConflicts.map(([lang, message]) => `${projectName}-${lang}: ${message}`))}
   `;
@@ -460,47 +459,35 @@ function printSuccesses({
 }
 
 function getInstallation(lang: string, outcome: Outcomes[string]) {
-  if (lang === "typescript" || lang === "node") {
-    const npmCommit = outcome.commit.completed.commit;
-    const npmPkgInstallCommand = npmCommit
-      ? `npm install "${getPkgStainlessURL({ repo: npmCommit.repo, sha: npmCommit.sha })}"`
-      : "";
-    const npmGitHubInstallCommand = npmCommit
-      ? `npm install "${getGitHubURL({ repo: npmCommit.repo })}"`
-      : "";
-
-    // we should not show pkg.stainless.com install instructions until the SDK is built (and uploaded)
-    const npmBuild = outcome.build;
-    const npmInstallCommand =
-      npmBuild?.status === "completed" &&
-      npmBuild.completed.conclusion === "success"
-        ? npmPkgInstallCommand
-        : npmGitHubInstallCommand;
-
-    return npmInstallCommand;
+  if (!outcome.commit.completed.commit) {
+    return null;
   }
 
-  if (lang === "python") {
-    const pythonCommit = outcome.commit.completed.commit;
-    const pythonPkgInstallCommand = pythonCommit
-      ? `pip install ${getPkgStainlessURL({ repo: pythonCommit.repo, sha: pythonCommit.sha })}`
-      : "";
-    const pythonGitHubInstallCommand = pythonCommit
-      ? `pip install git+${getGitHubURL({ repo: pythonCommit.repo })}`
-      : "";
+  const { repo, sha } = outcome.commit.completed.commit;
+  const build = outcome.build;
+  const installVia =
+    build?.status === "completed" && build.completed.conclusion === "success"
+      ? "pkg"
+      : "github";
 
-    // similarly, we should not show pkg.stainless.com install instructions for python until the SDK is uploaded
-    const pythonUpload = outcome.upload;
-    const pythonInstallCommand =
-      pythonUpload?.status === "completed" &&
-      pythonUpload.completed.conclusion === "success"
-        ? pythonPkgInstallCommand
-        : pythonGitHubInstallCommand;
-
-    return pythonInstallCommand;
+  switch (lang) {
+    case "typescript":
+    case "node": {
+      return installVia === "pkg"
+        ? `npm install ${getPkgStainlessURL({ repo, sha })}`
+        : `npm install ${getGitHubURL({ repo })}`;
+    }
+    case "python": {
+      // TODO: the python URLs may need a .tar.gz or .whl extension; update the
+      // API to return a URL instead
+      return installVia === "pkg"
+        ? `pip install ${getPkgStainlessURL({ repo, sha })}`
+        : `pip install git+${getGitHubURL({ repo })}`;
+    }
+    default: {
+      return null;
+    }
   }
-
-  return null;
 }
 
 function getGitHubURL({

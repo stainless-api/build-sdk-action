@@ -29079,6 +29079,55 @@ var require_libsodium_wrappers = __commonJS({
   }
 });
 
+// node_modules/ts-dedent/dist/index.js
+var require_dist = __commonJS({
+  "node_modules/ts-dedent/dist/index.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.dedent = void 0;
+    function dedent(templ) {
+      var values = [];
+      for (var _i = 1; _i < arguments.length; _i++) {
+        values[_i - 1] = arguments[_i];
+      }
+      var strings = Array.from(typeof templ === "string" ? [templ] : templ);
+      strings[strings.length - 1] = strings[strings.length - 1].replace(/\r?\n([\t ]*)$/, "");
+      var indentLengths = strings.reduce(function(arr, str) {
+        var matches = str.match(/\n([\t ]+|(?!\s).)/g);
+        if (matches) {
+          return arr.concat(matches.map(function(match) {
+            var _a2, _b;
+            return (_b = (_a2 = match.match(/[\t ]/g)) === null || _a2 === void 0 ? void 0 : _a2.length) !== null && _b !== void 0 ? _b : 0;
+          }));
+        }
+        return arr;
+      }, []);
+      if (indentLengths.length) {
+        var pattern_1 = new RegExp("\n[	 ]{" + Math.min.apply(Math, indentLengths) + "}", "g");
+        strings = strings.map(function(str) {
+          return str.replace(pattern_1, "\n");
+        });
+      }
+      strings[0] = strings[0].replace(/^\r?\n/, "");
+      var string = strings[0];
+      values.forEach(function(value, i) {
+        var endentations = string.match(/(?:^|\n)( *)$/);
+        var endentation = endentations ? endentations[1] : "";
+        var indentedValue = value;
+        if (typeof value === "string" && value.includes("\n")) {
+          indentedValue = String(value).split("\n").map(function(str, i2) {
+            return i2 === 0 ? str : "" + endentation + str;
+          }).join("\n");
+        }
+        string += indentedValue + strings[i + 1];
+      });
+      return string;
+    }
+    exports2.dedent = dedent;
+    exports2.default = dedent;
+  }
+});
+
 // src/preview.ts
 var import_core = __toESM(require_core());
 var exec3 = __toESM(require_exec());
@@ -33012,11 +33061,13 @@ function createClient(options) {
 }
 
 // src/markdown.ts
+var import_ts_dedent = __toESM(require_dist());
 var Symbol2 = {
   Bulb: "\u{1F4A1}",
   Exclamation: "\u2757",
   GreenSquare: "\u{1F7E9}",
   HeavyAsterisk: "\u2731",
+  HourglassFlowingSand: "\u23F3",
   MiddleDot: "\xB7",
   RedSquare: "\u{1F7E5}",
   RightwardsArrow: "\u2192",
@@ -33029,52 +33080,50 @@ var Symbol2 = {
 var Bold = (content) => `<b>${content}</b>`;
 var CodeInline = (content) => `<code>${content}</code>`;
 var Italic = (content) => `<i>${content}</i>`;
-function Dedent(value) {
-  value = value.replace(/\r?\n([\t ]*)$/, "");
-  const indentLengths = value.match(/\n([\t ]+|(?!\s).)/g)?.map((match) => match.match(/[\t ]/g)?.length ?? 0);
-  if (indentLengths && indentLengths.length > 0) {
-    const pattern = new RegExp(`
-[	 ]{${Math.min(...indentLengths)}}`, "g");
-    value = value.replace(pattern, "\n");
-  }
-  value = value.replace(/^\r?\n/, "");
-  return value;
+function Dedent(templ, ...args) {
+  return (0, import_ts_dedent.dedent)(templ, ...args).trim().replaceAll(/\n\s*\n/gi, "\n\n");
 }
-var Blockquote = (content) => `<blockquote>${content}</blockquote>`;
+var Blockquote = (content) => Dedent`
+    <blockquote>
+
+    ${content}
+
+    </blockquote>
+  `;
 var CodeBlock = (props) => {
   const delimiter = "```";
   const content = typeof props === "string" ? props : props.content;
   const language = typeof props === "string" ? "" : props.language;
-  return Dedent(`
+  return Dedent`
     ${delimiter}${language}
     ${content}
     ${delimiter}
-  `);
+  `;
 };
 var Details = ({
   summary,
   body,
+  indent = true,
   open = false
 }) => {
-  return Dedent(`
+  return Dedent`
     <details${open ? " open" : ""}>
-      <summary>${summary}</summary>
+    <summary>${summary}</summary>
 
-      ${body}
+    ${indent ? Blockquote(body) : body}
 
     </details>
-  `);
+  `;
 };
 var Heading = (content) => `<h3>${content}</h3>`;
 var Link = ({ text, href }) => `<a href="${href}">${text}</a>`;
 var List = (lines) => {
-  return Dedent(`
+  return Dedent`
     <ul>
-    ${lines.map((line) => `  <li>${line}</li>`).join("\n")}
+    ${lines.map((line) => `<li>${line}</li>`).join("\n")}
     </ul>
-  `);
+  `;
 };
-var Rule = () => `<hr />`;
 
 // src/comment.ts
 var DiagnosticIcon = {
@@ -33100,16 +33149,14 @@ function printComment({
     return [
       printCommitMessage({ commitMessage, projectName }),
       printFailures({ orgName, projectName, branch, outcomes }),
-      printMergeConflicts({ outcomes }),
+      printMergeConflicts({ projectName, outcomes }),
       printRegressions({ orgName, projectName, branch, details }),
       printSuccesses({ orgName, projectName, branch, details })
     ].filter((f) => f !== null).join(`
 
-${Rule}
-
 `);
   })();
-  return Dedent(`
+  return Dedent`
     ${Heading(`${Symbol2.HeavyAsterisk} Stainless SDK previews`)}
 
     ${Italic(
@@ -33117,19 +33164,17 @@ ${Rule}
   )}
 
     ${blocks}
-  `);
+  `;
 }
 function printCommitMessage({
   commitMessage,
   projectName
 }) {
-  return Dedent(`
-    ${Symbol2.SpeechBalloon} This PR updates ${CodeInline(projectName)}
-    SDKs with this commit message. To change the commit message, edit this
-    comment.
+  return Dedent`
+    ${Symbol2.SpeechBalloon} This PR updates ${CodeInline(projectName)} SDKs with this commit message.
 
     ${CodeBlock(commitMessage)}
-  `);
+  `;
 }
 function printFailures({
   orgName,
@@ -33148,7 +33193,6 @@ function printFailures({
       case "upstream_merge_conflict": {
         return null;
       }
-      case "failure":
       case "fatal": {
         return [lang, `Fatal error.`];
       }
@@ -33168,15 +33212,18 @@ function printFailures({
   }
   const studioURL = getStudioURL({ orgName, projectName, branch });
   const studioLink = Link({ text: "Stainless Studio", href: studioURL });
-  return Dedent(`
-    ${Symbol2.Exclamation} Failures. See the ${studioLink} for details.
+  return Dedent`
+    ${Symbol2.Exclamation} ${Bold("Failures.")} See the ${studioLink} for details.
 
     ${List(
-    failures.map(([lang, message]) => `${Bold(lang)}: ${message}`)
+    failures.map(([lang, message]) => `${projectName}-${lang}: ${message}`)
   )}
-  `);
+  `;
 }
-function printMergeConflicts({ outcomes }) {
+function printMergeConflicts({
+  projectName,
+  outcomes
+}) {
   const mergeConflicts = Object.entries(outcomes).map(([lang, outcome]) => {
     if (!outcome.commit.completed.merge_conflict_pr) {
       return null;
@@ -33198,14 +33245,11 @@ function printMergeConflicts({ outcomes }) {
     return null;
   }
   const runURL = `https://github.com/${github.context.repo.owner}/${github.context.repo.repo}/actions/runs/${github.context.runId}`;
-  return Dedent(`
-    ${Symbol2.Zap} Merge conflicts. You can resolve conflicts now; if you do,
-    ${Link({ text: "re-run this GitHub action", href: runURL })} to get
-    diffs. If you merge before resolving conflicts, new conflicts will be
-    created after merging.
+  return Dedent`
+    ${Symbol2.Zap} ${Bold("Merge conflicts.")} You can resolve conflicts now; if you do, ${Link({ text: "re-run this GitHub action", href: runURL })} to get diffs. If you merge before resolving conflicts, new conflict PRs will be created after merging.
 
-    ${List(mergeConflicts.map(([lang, message]) => `${Bold(lang)}: ${message}`))}
-  `);
+    ${List(mergeConflicts.map(([lang, message]) => `${projectName}-${lang}: ${message}`))}
+  `;
 }
 function getDetails({
   base,
@@ -33213,9 +33257,14 @@ function getDetails({
 }) {
   const result = {};
   for (const [lang, outcome] of Object.entries(head)) {
+    if (!["error", "warning", "note", "success"].includes(
+      outcome.commit.completed.conclusion
+    )) {
+      continue;
+    }
     const details = [];
     const baseOutcome = base?.[lang];
-    let hasRegression = false;
+    let status = "success";
     let githubLink = null;
     let compareLink = null;
     if (outcome.commit.completed.commit) {
@@ -33235,18 +33284,26 @@ function getDetails({
       compareLink = Link({ text: "diff", href: compareURL });
     }
     for (const check of ["build", "lint", "test"]) {
-      if (baseOutcome?.[check] && baseOutcome[check].status === "completed" && baseOutcome[check].completed.conclusion === "success" && outcome[check] && outcome[check].status === "completed" && outcome[check].completed.conclusion === "failure") {
-        const checkName = check === "build" ? "Build" : check === "lint" ? "Lint" : "Test";
-        const baseURL = baseOutcome[check].completed.url;
+      const checkName = check === "build" ? "Build" : check === "lint" ? "Lint" : "Test";
+      if ((!baseOutcome?.[check] || baseOutcome[check].status === "completed" && baseOutcome[check].completed.conclusion === "success") && outcome[check] && outcome[check].status === "completed" && outcome[check].completed.conclusion === "failure") {
+        const baseURL = baseOutcome?.[check]?.status === "completed" ? baseOutcome[check].completed.url : null;
         const baseText = `${Symbol2.WhiteCheckMark} success`;
-        const baseLink = baseURL ? Link({ text: baseText, href: baseURL }) : baseText;
+        const baseLink = baseURL ? Link({ text: baseText, href: baseURL }) : null;
         const headURL = outcome[check].completed.url;
         const headText = `${Symbol2.Exclamation} failure`;
         const headLink = headURL ? Link({ text: headText, href: headURL }) : headText;
-        details.push(
-          `${checkName}: ${baseLink} ${Symbol2.RightwardsArrow} ${headLink}`
-        );
-        hasRegression = true;
+        if (baseLink) {
+          details.push(
+            `${checkName}: ${baseLink} ${Symbol2.RightwardsArrow} ${headLink}`
+          );
+        } else {
+          details.push(`${checkName}: ${headLink}`);
+        }
+        status = "regression";
+      }
+      if (outcome[check] && outcome[check].status !== "completed") {
+        details.push(`${checkName}: ${Symbol2.HourglassFlowingSand} pending`);
+        status = "pending";
       }
     }
     if (baseOutcome?.diagnostics && outcome.diagnostics) {
@@ -33266,7 +33323,7 @@ function getDetails({
           levelCounts[d.level]++;
         }
         if (levelCounts.fatal > 0 || levelCounts.error > 0) {
-          hasRegression = true;
+          status = "regression";
         }
         const diagnosticCounts = Object.entries(levelCounts).filter(([, count]) => count > 0).map(([level, count]) => `${count} ${level}`);
         let hasOmittedDiagnostics = newDiagnostics.length > 10;
@@ -33280,12 +33337,11 @@ function getDetails({
         details.push(
           Details({
             summary: `New diagnostics (${diagnosticCounts.join(", ")})`,
-            body: Dedent(`
-              ${hasOmittedDiagnostics ? "Some diagnostics omitted." : ""}
-              See the Stainless Studio for more details.
+            body: Dedent`
+              ${hasOmittedDiagnostics ? "Some diagnostics omitted. " : ""}See the Stainless Studio for more details.
 
               ${List(diagnosticList)}
-            `)
+            `
           })
         );
       }
@@ -33295,7 +33351,8 @@ function getDetails({
       details.push(
         Details({
           summary: "Installation",
-          body: CodeBlock({ content: installation, language: "bash" })
+          body: CodeBlock({ content: installation, language: "bash" }),
+          indent: false
         })
       );
     }
@@ -33303,7 +33360,7 @@ function getDetails({
       githubLink,
       compareLink,
       details,
-      hasRegression
+      status
     };
   }
   return result;
@@ -33315,7 +33372,7 @@ function printRegressions({
   details
 }) {
   const regressions = Object.entries(details).filter(
-    ([, { hasRegression }]) => hasRegression
+    ([, { status }]) => status === "regression"
   );
   if (regressions.length === 0) {
     return null;
@@ -33331,17 +33388,17 @@ function printRegressions({
       const studioLink = Link({ text: "studio", href: studioURL });
       const headingLinks = [studioLink, githubLink, compareLink].filter((link) => link !== null).join(` ${Symbol2.MiddleDot} `);
       return Details({
-        summary: `${Bold(lang)}: ${headingLinks}`,
-        body: Blockquote(List(details2)),
+        summary: `${projectName}-${lang}: ${headingLinks}`,
+        body: details2.join("\n\n"),
         open: true
       });
     }
   );
-  return Dedent(`
-    ${Symbol2.Warning} Regressions.
+  return Dedent`
+    ${Symbol2.Warning} ${Bold("Regressions.")}
 
     ${formattedRegressions.join("\n\n")}
-  `);
+  `;
 }
 function printSuccesses({
   orgName,
@@ -33350,7 +33407,7 @@ function printSuccesses({
   details
 }) {
   const successes = Object.entries(details).filter(
-    ([, { hasRegression }]) => !hasRegression
+    ([, { status }]) => status === "success"
   );
   if (successes.length === 0) {
     return null;
@@ -33365,37 +33422,35 @@ function printSuccesses({
       });
       const studioLink = Link({ text: "studio", href: studioURL });
       const headingLinks = [studioLink, githubLink, compareLink].filter((link) => link !== null).join(` ${Symbol2.MiddleDot} `);
-      return Details({
-        summary: `${Bold(lang)}: ${headingLinks}`,
-        body: Blockquote(List(details2)),
-        open: false
-      });
+      const summary = `${projectName}-${lang}: ${headingLinks}`;
+      return details2.length > 0 ? Details({ summary, body: details2.join("\n\n") }) : `- ${summary}`;
     }
   );
-  return Dedent(`
-    ${Symbol2.WhiteCheckMark} Successes.
+  return Dedent`
+    ${Symbol2.WhiteCheckMark} ${Bold("Successes.")}
 
     ${formattedSuccesses.join("\n\n")}
-  `);
+  `;
 }
 function getInstallation(lang, outcome) {
-  if (lang === "typescript" || lang === "node") {
-    const npmCommit = outcome.commit.completed.commit;
-    const npmPkgInstallCommand = npmCommit ? `npm install "${getPkgStainlessURL({ repo: npmCommit.repo, sha: npmCommit.sha })}"` : "";
-    const npmGitHubInstallCommand = npmCommit ? `npm install "${getGitHubURL({ repo: npmCommit.repo })}"` : "";
-    const npmBuild = outcome.build;
-    const npmInstallCommand = npmBuild?.status === "completed" && npmBuild.completed.conclusion === "success" ? npmPkgInstallCommand : npmGitHubInstallCommand;
-    return npmInstallCommand;
+  if (!outcome.commit.completed.commit) {
+    return null;
   }
-  if (lang === "python") {
-    const pythonCommit = outcome.commit.completed.commit;
-    const pythonPkgInstallCommand = pythonCommit ? `pip install ${getPkgStainlessURL({ repo: pythonCommit.repo, sha: pythonCommit.sha })}` : "";
-    const pythonGitHubInstallCommand = pythonCommit ? `pip install git+${getGitHubURL({ repo: pythonCommit.repo })}` : "";
-    const pythonUpload = outcome.upload;
-    const pythonInstallCommand = pythonUpload?.status === "completed" && pythonUpload.completed.conclusion === "success" ? pythonPkgInstallCommand : pythonGitHubInstallCommand;
-    return pythonInstallCommand;
+  const { repo, sha } = outcome.commit.completed.commit;
+  const build = outcome.build;
+  const installVia = build?.status === "completed" && build.completed.conclusion === "success" ? "pkg" : "github";
+  switch (lang) {
+    case "typescript":
+    case "node": {
+      return installVia === "pkg" ? `npm install ${getPkgStainlessURL({ repo, sha })}` : `npm install ${getGitHubURL({ repo })}`;
+    }
+    case "python": {
+      return installVia === "pkg" ? `pip install ${getPkgStainlessURL({ repo, sha })}` : `pip install git+${getGitHubURL({ repo })}`;
+    }
+    default: {
+      return null;
+    }
   }
-  return null;
 }
 function getGitHubURL({
   repo
