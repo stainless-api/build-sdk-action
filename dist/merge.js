@@ -19564,7 +19564,7 @@ var require_platform = __commonJS({
     exports2.isWindows = exports2.platform === "win32";
     exports2.isMacOS = exports2.platform === "darwin";
     exports2.isLinux = exports2.platform === "linux";
-    function getDetails() {
+    function getDetails2() {
       return __awaiter(this, void 0, void 0, function* () {
         return Object.assign(Object.assign({}, yield exports2.isWindows ? getWindowsInfo() : exports2.isMacOS ? getMacOsInfo() : getLinuxInfo()), {
           platform: exports2.platform,
@@ -19575,7 +19575,7 @@ var require_platform = __commonJS({
         });
       });
     }
-    exports2.getDetails = getDetails;
+    exports2.getDetails = getDetails2;
   }
 });
 
@@ -29079,6 +29079,55 @@ var require_libsodium_wrappers = __commonJS({
   }
 });
 
+// node_modules/ts-dedent/dist/index.js
+var require_dist = __commonJS({
+  "node_modules/ts-dedent/dist/index.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.dedent = void 0;
+    function dedent(templ) {
+      var values = [];
+      for (var _i = 1; _i < arguments.length; _i++) {
+        values[_i - 1] = arguments[_i];
+      }
+      var strings = Array.from(typeof templ === "string" ? [templ] : templ);
+      strings[strings.length - 1] = strings[strings.length - 1].replace(/\r?\n([\t ]*)$/, "");
+      var indentLengths = strings.reduce(function(arr, str) {
+        var matches = str.match(/\n([\t ]+|(?!\s).)/g);
+        if (matches) {
+          return arr.concat(matches.map(function(match) {
+            var _a2, _b;
+            return (_b = (_a2 = match.match(/[\t ]/g)) === null || _a2 === void 0 ? void 0 : _a2.length) !== null && _b !== void 0 ? _b : 0;
+          }));
+        }
+        return arr;
+      }, []);
+      if (indentLengths.length) {
+        var pattern_1 = new RegExp("\n[	 ]{" + Math.min.apply(Math, indentLengths) + "}", "g");
+        strings = strings.map(function(str) {
+          return str.replace(pattern_1, "\n");
+        });
+      }
+      strings[0] = strings[0].replace(/^\r?\n/, "");
+      var string = strings[0];
+      values.forEach(function(value, i) {
+        var endentations = string.match(/(?:^|\n)( *)$/);
+        var endentation = endentations ? endentations[1] : "";
+        var indentedValue = value;
+        if (typeof value === "string" && value.includes("\n")) {
+          indentedValue = String(value).split("\n").map(function(str, i2) {
+            return i2 === 0 ? str : "" + endentation + str;
+          }).join("\n");
+        }
+        string += indentedValue + strings[i + 1];
+      });
+      return string;
+    }
+    exports2.dedent = dedent;
+    exports2.default = dedent;
+  }
+});
+
 // src/merge.ts
 var import_core = __toESM(require_core());
 
@@ -29276,7 +29325,7 @@ var safeJSON = (text) => {
 var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // node_modules/@stainless-api/sdk/version.mjs
-var VERSION = "0.1.0-alpha.10";
+var VERSION = "0.1.0-alpha.11";
 
 // node_modules/@stainless-api/sdk/internal/detect-platform.mjs
 function getDetectedPlatform() {
@@ -30029,8 +30078,8 @@ var AbstractPage = class {
   }
 };
 var PagePromise = class extends APIPromise {
-  constructor(client, request, Page) {
-    super(client, request, async (client2, props) => new Page(client2, props.response, await defaultParseResponse(client2, props), props.options));
+  constructor(client, request, Page2) {
+    super(client, request, async (client2, props) => new Page2(client2, props.response, await defaultParseResponse(client2, props), props.options));
   }
   /**
    * Allow auto-paginating iteration on an unawaited list call, eg:
@@ -30046,7 +30095,7 @@ var PagePromise = class extends APIPromise {
     }
   }
 };
-var List = class extends AbstractPage {
+var Page = class extends AbstractPage {
   constructor(client, response, body, options) {
     super(client, response, body, options);
     this.data = body.data || [];
@@ -30207,7 +30256,7 @@ var Diagnostics = class extends APIResource {
    * Get diagnostics for a build
    */
   list(buildID, query = {}, options) {
-    return this._client.getAPIList(path`/v0/builds/${buildID}/diagnostics`, List, {
+    return this._client.getAPIList(path`/v0/builds/${buildID}/diagnostics`, Page, {
       query,
       ...options
     });
@@ -30249,7 +30298,7 @@ var Builds = class extends APIResource {
    */
   list(params = {}, options) {
     const { project = this._client.project, ...query } = params ?? {};
-    return this._client.getAPIList("/v0/builds", List, {
+    return this._client.getAPIList("/v0/builds", Page, {
       query: { project, ...query },
       ...options
     });
@@ -30353,10 +30402,10 @@ var Projects = class extends APIResource {
     return this._client.patch(path`/v0/projects/${project}`, { body, ...options });
   }
   /**
-   * List projects in an organization
+   * List projects in an organization, from oldest to newest
    */
   list(query = {}, options) {
-    return this._client.getAPIList("/v0/projects", List, { query, ...options });
+    return this._client.getAPIList("/v0/projects", Page, { query, ...options });
   }
 };
 Projects.Branches = Branches;
@@ -30453,17 +30502,12 @@ var _Stainless_instances;
 var _a;
 var _Stainless_encoder;
 var _Stainless_baseURLOverridden;
-var environments = {
-  production: "https://api.stainless.com",
-  staging: "https://staging.stainless.com"
-};
 var Stainless = class {
   /**
    * API Client for interfacing with the Stainless API.
    *
    * @param {string | null | undefined} [opts.apiKey=process.env['STAINLESS_API_KEY'] ?? null]
    * @param {string | null | undefined} [opts.project]
-   * @param {Environment} [opts.environment=production] - Specifies the environment URL to use for the API.
    * @param {string} [opts.baseURL=process.env['STAINLESS_BASE_URL'] ?? https://api.stainless.com] - Override the default base URL for the API.
    * @param {number} [opts.timeout=1 minute] - The maximum amount of time (in milliseconds) the client will wait for a response before timing out.
    * @param {MergedRequestInit} [opts.fetchOptions] - Additional `RequestInit` options to be passed to `fetch` calls.
@@ -30483,13 +30527,9 @@ var Stainless = class {
       apiKey,
       project,
       ...opts,
-      baseURL,
-      environment: opts.environment ?? "production"
+      baseURL: baseURL || `https://api.stainless.com`
     };
-    if (baseURL && opts.environment) {
-      throw new StainlessError("Ambiguous URL; The `baseURL` option (or STAINLESS_BASE_URL env var) and the `environment` option are given. If you want to use the environment you must pass baseURL: null");
-    }
-    this.baseURL = options.baseURL || environments[options.environment || "production"];
+    this.baseURL = options.baseURL;
     this.timeout = options.timeout ?? _a.DEFAULT_TIMEOUT;
     this.logger = options.logger ?? console;
     const defaultLogLevel = "warn";
@@ -30509,8 +30549,7 @@ var Stainless = class {
   withOptions(options) {
     return new this.constructor({
       ...this._options,
-      environment: options.environment ? options.environment : void 0,
-      baseURL: options.environment ? void 0 : this.baseURL,
+      baseURL: this.baseURL,
       maxRetries: this.maxRetries,
       timeout: this.timeout,
       logger: this.logger,
@@ -30695,12 +30734,12 @@ var Stainless = class {
     }));
     return { response, options, controller, requestLogID, retryOfRequestLogID, startTime };
   }
-  getAPIList(path3, Page, opts) {
-    return this.requestAPIList(Page, { method: "get", path: path3, ...opts });
+  getAPIList(path3, Page2, opts) {
+    return this.requestAPIList(Page2, { method: "get", path: path3, ...opts });
   }
-  requestAPIList(Page, options) {
+  requestAPIList(Page2, options) {
     const request = this.makeRequest(options, null, void 0);
-    return new PagePromise(this, request, Page);
+    return new PagePromise(this, request, Page2);
   }
   async fetchWithTimeout(url, init, ms, controller) {
     const { signal, method, ...options } = init || {};
@@ -30839,7 +30878,7 @@ var Stainless = class {
   }
 };
 _a = Stainless, _Stainless_encoder = /* @__PURE__ */ new WeakMap(), _Stainless_instances = /* @__PURE__ */ new WeakSet(), _Stainless_baseURLOverridden = function _Stainless_baseURLOverridden2() {
-  return this.baseURL !== environments[this._options.environment || "production"];
+  return this.baseURL !== "https://api.stainless.com";
 };
 Stainless.Stainless = _a;
 Stainless.DEFAULT_TIMEOUT = 6e4;
@@ -31091,7 +31130,24 @@ async function pollBuild({
             `[${buildId}] Build has output:`,
             JSON.stringify(buildOutput)
           );
-          outcomes[language] = { ...buildOutput, commit: buildOutput.commit };
+          const diagnostics = [];
+          try {
+            for await (const diagnostic of stainless.builds.diagnostics.list(
+              buildId
+            )) {
+              diagnostics.push(diagnostic);
+            }
+          } catch (e) {
+            console.error(
+              `[${buildId}] Error getting diagnostics, continuing anyway`,
+              e
+            );
+          }
+          outcomes[language] = {
+            ...buildOutput,
+            commit: buildOutput.commit,
+            diagnostics
+          };
         }
       }
     }
@@ -31123,9 +31179,11 @@ async function pollBuild({
         completed: {
           conclusion: "timed_out",
           commit: null,
-          merge_conflict_pr: null
+          merge_conflict_pr: null,
+          url: null
         }
-      }
+      },
+      diagnostics: []
     };
   }
   return { outcomes, documentedSpec };
@@ -31567,8 +31625,8 @@ var AbstractPage2 = /* @__PURE__ */ (() => {
 })();
 var PagePromise2 = /* @__PURE__ */ (() => {
   class PagePromise3 extends APIPromise2 {
-    constructor(client, request, Page) {
-      super(client, request, async (client2, props) => new Page(client2, props.response, await defaultParseResponse2(client2, props), props.options));
+    constructor(client, request, Page2) {
+      super(client, request, async (client2, props) => new Page2(client2, props.response, await defaultParseResponse2(client2, props), props.options));
     }
     /**
      * Allow auto-paginating iteration on an unawaited list call, eg:
@@ -32813,12 +32871,12 @@ var BaseGitHub = /* @__PURE__ */ (() => {
       }));
       return { response, options, controller, requestLogID, retryOfRequestLogID, startTime };
     }
-    getAPIList(path3, Page, opts) {
-      return this.requestAPIList(Page, { method: "get", path: path3, ...opts });
+    getAPIList(path3, Page2, opts) {
+      return this.requestAPIList(Page2, { method: "get", path: path3, ...opts });
     }
-    requestAPIList(Page, options) {
+    requestAPIList(Page2, options) {
       const request = this.makeRequest(options, null, void 0);
-      return new PagePromise2(this, request, Page);
+      return new PagePromise2(this, request, Page2);
     }
     async fetchWithTimeout(url, init, ms, controller) {
       const { signal, method, ...options } = init || {};
@@ -33000,34 +33058,425 @@ function createClient(options) {
   return client;
 }
 
+// src/markdown.ts
+var import_ts_dedent = __toESM(require_dist());
+var Symbol2 = {
+  Bulb: "\u{1F4A1}",
+  Exclamation: "\u2757",
+  GreenSquare: "\u{1F7E9}",
+  HeavyAsterisk: "\u2731",
+  HourglassFlowingSand: "\u23F3",
+  MiddleDot: "\xB7",
+  RedSquare: "\u{1F7E5}",
+  RightwardsArrow: "\u2192",
+  SpeechBalloon: "\u{1F4AC}",
+  Warning: "\u26A0\uFE0F",
+  WhiteCheckMark: "\u2705",
+  WhiteLargeSquare: "\u2B1C",
+  Zap: "\u26A1"
+};
+var Bold = (content) => `<b>${content}</b>`;
+var CodeInline = (content) => `<code>${content}</code>`;
+var Italic = (content) => `<i>${content}</i>`;
+function Dedent(templ, ...args) {
+  return (0, import_ts_dedent.dedent)(templ, ...args).trim().replaceAll(/\n\s*\n/gi, "\n\n");
+}
+var Blockquote = (content) => Dedent`
+    <blockquote>
+
+    ${content}
+
+    </blockquote>
+  `;
+var CodeBlock = (props) => {
+  const delimiter = "```";
+  const content = typeof props === "string" ? props : props.content;
+  const language = typeof props === "string" ? "" : props.language;
+  return Dedent`
+    ${delimiter}${language}
+    ${content}
+    ${delimiter}
+  `;
+};
+var Details = ({
+  summary,
+  body,
+  indent = true,
+  open = false
+}) => {
+  return Dedent`
+    <details${open ? " open" : ""}>
+    <summary>${summary}</summary>
+
+    ${indent ? Blockquote(body) : body}
+
+    </details>
+  `;
+};
+var Heading = (content) => `<h3>${content}</h3>`;
+var Link = ({ text, href }) => `<a href="${href}">${text}</a>`;
+var List = (lines) => {
+  return Dedent`
+    <ul>
+    ${lines.map((line) => `<li>${line}</li>`).join("\n")}
+    </ul>
+  `;
+};
+
 // src/comment.ts
-function generateMergeComment({
-  outcomes,
+var DiagnosticIcon = {
+  fatal: Symbol2.Exclamation,
+  error: Symbol2.Exclamation,
+  warning: Symbol2.Warning,
+  note: Symbol2.Bulb
+};
+function printComment({
+  noChanges,
   orgName,
+  projectName,
+  branch,
+  commitMessage,
+  baseOutcomes,
+  outcomes
+}) {
+  const blocks = (() => {
+    if (noChanges) {
+      return "No changes were made to the SDKs.";
+    }
+    const details = getDetails({ base: baseOutcomes, head: outcomes });
+    return [
+      printCommitMessage({ commitMessage, projectName }),
+      printFailures({ orgName, projectName, branch, outcomes }),
+      printMergeConflicts({ projectName, outcomes }),
+      printRegressions({ orgName, projectName, branch, details }),
+      printSuccesses({ orgName, projectName, branch, details }),
+      printPending({ details })
+    ].filter((f) => f !== null).join(`
+
+`);
+  })();
+  return Dedent`
+    ${Heading(`${Symbol2.HeavyAsterisk} Stainless SDK previews`)}
+
+    ${Italic(
+    `Last updated: ${(/* @__PURE__ */ new Date()).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC")}`
+  )}
+
+    ${blocks}
+  `;
+}
+function printCommitMessage({
+  commitMessage,
   projectName
 }) {
-  const generateRow = (lang, outcome) => {
-    let studioUrl;
-    if (outcome.commit) {
-      studioUrl = `https://app.stainless.com/${orgName}/${projectName}/studio?language=${lang}&branch=main`;
-    }
-    const studioLink = studioUrl ? `[Studio](${studioUrl})` : "";
-    return `
-| ${lang} | ${outcome.commit.completed.conclusion} | ${studioLink} |`;
-  };
-  const header = `
-| Language | Conclusion | Studio |
-|----------|------------|--------|`;
-  const tableRows = Object.keys(outcomes).map((lang) => {
-    const outcome = outcomes[lang];
-    return generateRow(lang, outcome);
-  }).join("");
-  return `
-### :rocket: SDK Build Status
-The following table summarizes the build outcomes for all languages:
+  return Dedent`
+    ${Symbol2.SpeechBalloon} This PR updates ${CodeInline(projectName)} SDKs with this commit message.
 
-${header}${tableRows}
-`;
+    ${CodeBlock(commitMessage)}
+  `;
+}
+function printFailures({
+  orgName,
+  projectName,
+  branch,
+  outcomes
+}) {
+  const failures = Object.entries(outcomes).map(([lang, outcome]) => {
+    switch (outcome.commit.completed.conclusion) {
+      case "noop":
+      case "error":
+      case "warning":
+      case "note":
+      case "success":
+      case "merge_conflict":
+      case "upstream_merge_conflict": {
+        return null;
+      }
+      case "fatal": {
+        return [lang, `Fatal error.`];
+      }
+      case "timed_out": {
+        return [lang, `Timed out.`];
+      }
+      default: {
+        return [
+          lang,
+          `Unknown conclusion (${CodeInline(outcome.commit.completed.conclusion)}).`
+        ];
+      }
+    }
+  }).filter((f) => f !== null);
+  if (!failures.length) {
+    return null;
+  }
+  const studioURL = getStudioURL({ orgName, projectName, branch });
+  const studioLink = Link({ text: "Stainless Studio", href: studioURL });
+  return Dedent`
+    ${Symbol2.Exclamation} ${Bold("Failures.")} See the ${studioLink} for details.
+
+    ${List(
+    failures.map(([lang, message]) => `${projectName}-${lang}: ${message}`)
+  )}
+  `;
+}
+function printMergeConflicts({
+  projectName,
+  outcomes
+}) {
+  const mergeConflicts = Object.entries(outcomes).map(([lang, outcome]) => {
+    if (!outcome.commit.completed.merge_conflict_pr) {
+      return null;
+    }
+    const {
+      number,
+      repo: { owner, name }
+    } = outcome.commit.completed.merge_conflict_pr;
+    const url = `https://github.com/${owner}/${name}/pull/${number}`;
+    if (outcome.commit.completed.conclusion === "upstream_merge_conflict") {
+      return [
+        lang,
+        `The base branch has a conflict. ${Link({ text: "Link to conflict.", href: url })}`
+      ];
+    }
+    return [lang, `${Link({ text: "Link to conflict.", href: url })}`];
+  }).filter((f) => f !== null);
+  if (!mergeConflicts.length) {
+    return null;
+  }
+  const runURL = `https://github.com/${github.context.repo.owner}/${github.context.repo.repo}/actions/runs/${github.context.runId}`;
+  return Dedent`
+    ${Symbol2.Zap} ${Bold("Merge conflicts.")} You can resolve conflicts now; if you do, ${Link({ text: "re-run this GitHub action", href: runURL })} to get diffs. If you merge before resolving conflicts, new conflict PRs will be created after merging.
+
+    ${List(mergeConflicts.map(([lang, message]) => `${projectName}-${lang}: ${message}`))}
+  `;
+}
+function getDetails({
+  base,
+  head
+}) {
+  const result = {};
+  for (const [lang, outcome] of Object.entries(head)) {
+    if (!["error", "warning", "note", "success"].includes(
+      outcome.commit.completed.conclusion
+    )) {
+      continue;
+    }
+    const details = [];
+    const baseOutcome = base?.[lang];
+    let githubLink = null;
+    let compareLink = null;
+    let isPending = false;
+    let isRegression = false;
+    if (outcome.commit.completed.commit) {
+      const {
+        repo: { owner, name, branch }
+      } = outcome.commit.completed.commit;
+      const githubURL = `https://github.com/${owner}/${name}/tree/${branch}`;
+      githubLink = Link({ text: "code", href: githubURL });
+    }
+    if (baseOutcome?.commit.completed.commit && outcome.commit.completed.commit) {
+      const {
+        repo: { owner, name }
+      } = outcome.commit.completed.commit;
+      const base2 = baseOutcome.commit.completed.commit.repo.branch;
+      const head2 = outcome.commit.completed.commit.repo.branch;
+      const compareURL = `https://github.com/${owner}/${name}/compare/${base2}..${head2}`;
+      compareLink = Link({ text: "diff", href: compareURL });
+    }
+    for (const check of ["build", "lint", "test"]) {
+      const checkName = check === "build" ? "Build" : check === "lint" ? "Lint" : "Test";
+      if ((!baseOutcome?.[check] || baseOutcome[check].status === "completed" && baseOutcome[check].completed.conclusion === "success") && outcome[check] && outcome[check].status === "completed" && outcome[check].completed.conclusion === "failure") {
+        const baseURL = baseOutcome?.[check]?.status === "completed" ? baseOutcome[check].completed.url : null;
+        const baseText = `${Symbol2.WhiteCheckMark} success`;
+        const baseLink = baseURL ? Link({ text: baseText, href: baseURL }) : null;
+        const headURL = outcome[check].completed.url;
+        const headText = `${Symbol2.Exclamation} failure`;
+        const headLink = headURL ? Link({ text: headText, href: headURL }) : headText;
+        if (baseLink) {
+          details.push(
+            `${checkName}: ${baseLink} ${Symbol2.RightwardsArrow} ${headLink}`
+          );
+        } else {
+          details.push(`${checkName}: ${headLink}`);
+        }
+        isRegression = true;
+      }
+      if (outcome[check] && outcome[check].status !== "completed") {
+        details.push(`${checkName}: ${Symbol2.HourglassFlowingSand} pending`);
+        isPending = true;
+      }
+    }
+    if (baseOutcome?.diagnostics && outcome.diagnostics) {
+      const newDiagnostics = outcome.diagnostics.filter(
+        (d) => !baseOutcome.diagnostics.some(
+          (bd) => bd.code === d.code && bd.message === d.message && bd.config_ref === d.config_ref && bd.oas_ref === d.oas_ref
+        )
+      );
+      if (newDiagnostics.length > 0) {
+        const levelCounts = {
+          fatal: 0,
+          error: 0,
+          warning: 0,
+          note: 0
+        };
+        for (const d of newDiagnostics) {
+          levelCounts[d.level]++;
+        }
+        if (levelCounts.fatal > 0 || levelCounts.error > 0 || levelCounts.warning > 0) {
+          isRegression = true;
+        }
+        const diagnosticCounts = Object.entries(levelCounts).filter(([, count]) => count > 0).map(([level, count]) => `${count} ${level}`);
+        let hasOmittedDiagnostics = newDiagnostics.length > 10;
+        const diagnosticList = newDiagnostics.slice(0, 10).map((d) => {
+          if (d.level === "note") {
+            hasOmittedDiagnostics = true;
+            return null;
+          }
+          return `${DiagnosticIcon[d.level]} ${Bold(d.code)}: ${d.message}`;
+        }).filter(Boolean);
+        details.push(
+          Details({
+            summary: `New diagnostics (${diagnosticCounts.join(", ")})`,
+            body: Dedent`
+              ${hasOmittedDiagnostics ? "Some diagnostics omitted. " : ""}See the Stainless Studio for more details.
+
+              ${List(diagnosticList)}
+            `
+          })
+        );
+      }
+    }
+    const installation = getInstallation(lang, outcome);
+    if (installation) {
+      details.push(
+        Details({
+          summary: "Installation",
+          body: CodeBlock({ content: installation, language: "bash" }),
+          indent: false
+        })
+      );
+    }
+    result[lang] = {
+      githubLink,
+      compareLink,
+      details,
+      isPending,
+      isRegression
+    };
+  }
+  return result;
+}
+function printRegressions({
+  orgName,
+  projectName,
+  branch,
+  details
+}) {
+  const regressions = Object.entries(details).filter(
+    ([, { isRegression }]) => isRegression
+  );
+  if (regressions.length === 0) {
+    return null;
+  }
+  const formattedRegressions = regressions.map(
+    ([lang, { githubLink, compareLink, details: details2 }]) => {
+      const studioURL = getStudioURL({
+        orgName,
+        projectName,
+        language: lang,
+        branch
+      });
+      const studioLink = Link({ text: "studio", href: studioURL });
+      const headingLinks = [studioLink, githubLink, compareLink].filter((link) => link !== null).join(` ${Symbol2.MiddleDot} `);
+      return Details({
+        summary: `${projectName}-${lang}: ${headingLinks}`,
+        body: details2.join("\n\n"),
+        open: true
+      });
+    }
+  );
+  return Dedent`
+    ${Symbol2.Warning} ${Bold("Regressions.")}
+
+    ${formattedRegressions.join("\n\n")}
+  `;
+}
+function printSuccesses({
+  orgName,
+  projectName,
+  branch,
+  details
+}) {
+  const successes = Object.entries(details).filter(
+    ([, { isPending, isRegression }]) => !isPending && !isRegression
+  );
+  if (successes.length === 0) {
+    return null;
+  }
+  const formattedSuccesses = successes.map(
+    ([lang, { githubLink, compareLink, details: details2 }]) => {
+      const studioURL = getStudioURL({
+        orgName,
+        projectName,
+        language: lang,
+        branch
+      });
+      const studioLink = Link({ text: "studio", href: studioURL });
+      const headingLinks = [studioLink, githubLink, compareLink].filter((link) => link !== null).join(` ${Symbol2.MiddleDot} `);
+      const summary = `${projectName}-${lang}: ${headingLinks}`;
+      return details2.length > 0 ? Details({ summary, body: details2.join("\n\n") }) : `- ${summary}`;
+    }
+  );
+  return Dedent`
+    ${Symbol2.WhiteCheckMark} ${Bold("Successes.")}
+
+    ${formattedSuccesses.join("\n\n")}
+  `;
+}
+function printPending({ details }) {
+  const pending = Object.entries(details).filter(
+    ([, { isPending }]) => isPending
+  );
+  if (pending.length === 0) {
+    return null;
+  }
+  return Dedent`
+    ${Symbol2.HourglassFlowingSand} These are partial results; builds are still running.
+  `;
+}
+function getInstallation(lang, outcome) {
+  if (!outcome.commit.completed.commit) {
+    return null;
+  }
+  const { repo } = outcome.commit.completed.commit;
+  switch (lang) {
+    case "typescript":
+    case "node": {
+      return `npm install ${getGitHubURL({ repo })}`;
+    }
+    case "python": {
+      return `pip install git+${getGitHubURL({ repo })}`;
+    }
+    default: {
+      return null;
+    }
+  }
+}
+function getGitHubURL({
+  repo
+}) {
+  return `https://github.com/${repo.owner}/${repo.name}.git#${repo.branch}`;
+}
+function getStudioURL({
+  orgName,
+  projectName,
+  language,
+  branch
+}) {
+  if (language) {
+    return `https://app.stainless.com/${orgName}/${projectName}/studio?language=${language}&branch=${branch}`;
+  }
+  return `https://app.stainless.com/${orgName}/${projectName}/studio?branch=${branch}`;
 }
 async function upsertComment({
   body,
@@ -33127,10 +33576,12 @@ async function main() {
       if (makeComment) {
         const { outcomes } = latestRun;
         (0, import_core.startGroup)("Updating comment");
-        const commentBody = generateMergeComment({
-          outcomes,
+        const commentBody = printComment({
           orgName,
-          projectName
+          projectName,
+          branch: "main",
+          commitMessage,
+          outcomes
         });
         await upsertComment({ body: commentBody, token: githubToken });
         (0, import_core.endGroup)();

@@ -1,171 +1,506 @@
 import * as github from "@actions/github";
-import { Comments } from "@stainless-api/github-internal/resources/repos/issues/comments";
-import { createClient } from "@stainless-api/github-internal/tree-shakable";
+import { Comments as GitHubComments } from "@stainless-api/github-internal/resources/repos/issues/comments";
+import { createClient as createGitHubClient } from "@stainless-api/github-internal/tree-shakable";
+import type { Stainless } from "@stainless-api/sdk";
 import { Outcomes } from "./build";
+import * as MD from "./markdown";
 
-export function generatePreviewComment({
+type DiagnosticLevel =
+  Stainless.Builds.Diagnostics.DiagnosticListResponse["level"];
+
+const DiagnosticIcon: Record<DiagnosticLevel, string> = {
+  fatal: MD.Symbol.Exclamation,
+  error: MD.Symbol.Exclamation,
+  warning: MD.Symbol.Warning,
+  note: MD.Symbol.Bulb,
+};
+
+type PrintCommentOptions = {
+  noChanges: boolean;
+  orgName: string;
+  projectName: string;
+  branch: string;
+  commitMessage: string;
+  baseOutcomes?: Outcomes | null;
+  outcomes: Outcomes;
+};
+
+export function printComment({
   noChanges,
-  outcomes,
-  baseOutcomes,
   orgName,
   projectName,
+  branch,
+  commitMessage,
+  baseOutcomes,
+  outcomes,
 }:
-  | {
-      noChanges?: never;
-      outcomes: Outcomes;
-      baseOutcomes?: Outcomes | null;
-      orgName: string;
-      projectName: string;
+  | ({ noChanges?: never } & Omit<PrintCommentOptions, "noChanges">)
+  | ({ noChanges: true } & {
+      [K in keyof Omit<PrintCommentOptions, "noChanges">]?: never;
+    })) {
+  const blocks = (() => {
+    if (noChanges) {
+      return "No changes were made to the SDKs.";
     }
-  | {
-      noChanges: true;
-      outcomes?: never;
-      baseOutcomes?: never;
-      orgName?: never;
-      projectName?: never;
-    }) {
-  const makeHeader = () => `
-### :sparkles: SDK Previews
-_Last updated: ${new Date()
-    .toISOString()
-    .replace("T", " ")
-    .replace(/\.\d+Z$/, " UTC")}_
-`;
 
-  if (noChanges) {
-    return `
-${makeHeader()}
+    const details = getDetails({ base: baseOutcomes, head: outcomes });
+    return [
+      printCommitMessage({ commitMessage, projectName }),
+      printFailures({ orgName, projectName, branch, outcomes }),
+      printMergeConflicts({ projectName, outcomes }),
+      printRegressions({ orgName, projectName, branch, details }),
+      printSuccesses({ orgName, projectName, branch, details }),
+      printPending({ details }),
+    ]
+      .filter((f): f is string => f !== null)
+      .join(`\n\n`);
+  })();
 
-No changes were made to the SDKs.
-`;
-  }
+  return MD.Dedent`
+    ${MD.Heading(`${MD.Symbol.HeavyAsterisk} Stainless SDK previews`)}
 
-  const generateRow = (
-    lang: string,
-    outcome: Outcomes[string],
-    baseOutcome?: Outcomes[string],
-  ) => {
-    const studioUrl = `https://app.stainless.com/${orgName}/${projectName}/studio?language=${lang}&branch=preview/${github.context.payload.pull_request!.head.ref}`;
-    let githubUrl;
-    let compareUrl;
-    let notes = "";
+    ${MD.Italic(
+      `Last updated: ${new Date()
+        .toISOString()
+        .replace("T", " ")
+        .replace(/\.\d+Z$/, " UTC")}`,
+    )}
 
-    const baseCompletedCommit = baseOutcome?.commit.completed;
-    const completedCommit = outcome.commit.completed;
+    ${blocks}
+  `;
+}
 
-    if (completedCommit.commit) {
-      const { owner, name, branch } = completedCommit.commit.repo;
-      githubUrl = `https://github.com/${owner}/${name}/tree/${branch}`;
+function printCommitMessage({
+  commitMessage,
+  projectName,
+}: {
+  commitMessage: string;
+  projectName: string;
+}) {
+  // TODO: support editing comment to change commit message
+  return MD.Dedent`
+    ${MD.Symbol.SpeechBalloon} This PR updates ${MD.CodeInline(projectName)} SDKs with this commit message.
 
-      if (baseCompletedCommit?.commit) {
-        const base = baseCompletedCommit.commit.repo.branch;
-        const head = branch;
-        compareUrl = `https://github.com/${owner}/${name}/compare/${base}..${head}`;
-      } else {
-        if (baseOutcome) {
-          notes = `Could not generate a diff link because the base build had conclusion: ${baseCompletedCommit?.conclusion}`;
-        } else {
-          notes = `Could not generate a diff link because a base build was not found`;
+    ${MD.CodeBlock(commitMessage)}
+  `;
+}
+
+function printFailures({
+  orgName,
+  projectName,
+  branch,
+  outcomes,
+}: {
+  orgName: string;
+  projectName: string;
+  branch: string;
+  outcomes: Outcomes;
+}) {
+  const failures = Object.entries(outcomes)
+    .map<[string, string] | null>(([lang, outcome]) => {
+      switch (outcome.commit.completed.conclusion) {
+        case "noop":
+        case "error":
+        case "warning":
+        case "note":
+        case "success":
+        case "merge_conflict":
+        case "upstream_merge_conflict": {
+          // non-failures
+          return null;
+        }
+        case "fatal": {
+          return [lang, `Fatal error.`];
+        }
+        case "timed_out": {
+          return [lang, `Timed out.`];
+        }
+        default: {
+          return [
+            lang,
+            `Unknown conclusion (${MD.CodeInline(outcome.commit.completed.conclusion)}).`,
+          ];
         }
       }
-    } else if (completedCommit.merge_conflict_pr) {
+    })
+    .filter((f): f is [string, string] => f !== null);
+
+  if (!failures.length) {
+    return null;
+  }
+
+  const studioURL = getStudioURL({ orgName, projectName, branch });
+  const studioLink = MD.Link({ text: "Stainless Studio", href: studioURL });
+
+  return MD.Dedent`
+    ${MD.Symbol.Exclamation} ${MD.Bold("Failures.")} See the ${studioLink} for details.
+
+    ${MD.List(
+      failures.map(([lang, message]) => `${projectName}-${lang}: ${message}`),
+    )}
+  `;
+}
+
+function printMergeConflicts({
+  projectName,
+  outcomes,
+}: {
+  projectName: string;
+  outcomes: Outcomes;
+}) {
+  const mergeConflicts = Object.entries(outcomes)
+    .map<[string, string] | null>(([lang, outcome]) => {
+      if (!outcome.commit.completed.merge_conflict_pr) {
+        return null;
+      }
       const {
         number,
         repo: { owner, name },
-      } = completedCommit.merge_conflict_pr;
-      const mergeConflictUrl = `https://github.com/${owner}/${name}/pull/${number}`;
-      const runUrl = `https://github.com/${github.context.payload.repository?.full_name}/actions/runs/${github.context.runId}`;
-      if (completedCommit.conclusion === "upstream_merge_conflict") {
-        notes = `A preview could not be generated because there is a conflict on the parent branch. Please resolve the [conflict](${mergeConflictUrl}) then re-run the [workflow](${runUrl}).`;
-      } else {
-        notes = `The build resulted in a merge conflict. Please resolve the [conflict](${mergeConflictUrl}) then re-run the [workflow](${runUrl}).`;
+      } = outcome.commit.completed.merge_conflict_pr!;
+      const url = `https://github.com/${owner}/${name}/pull/${number}`;
+      if (outcome.commit.completed.conclusion === "upstream_merge_conflict") {
+        return [
+          lang,
+          `The base branch has a conflict. ${MD.Link({ text: "Link to conflict.", href: url })}`,
+        ];
       }
-    } else {
-      notes = `Could not generate a branch or diff link because the build had conclusion: ${completedCommit.conclusion}`;
-    }
-
-    const githubLink = githubUrl ? `[Branch](${githubUrl})` : "";
-    const studioLink = studioUrl ? `[Studio](${studioUrl})` : "";
-    const compareLink = compareUrl ? `[Diff](${compareUrl})` : "";
-    const lint =
-      outcome.lint?.status === "completed"
-        ? outcome.lint.completed.conclusion
-        : "pending";
-    const test =
-      outcome.test?.status === "completed"
-        ? outcome.test.completed.conclusion
-        : "pending";
-
-    return `
-| ${lang} | ${completedCommit.conclusion} | ${lint} | ${test} | ${githubLink} | ${studioLink} | ${compareLink} | ${notes} |`;
-  };
-
-  const tableHeader = `
-| Language | Conclusion | Lint | Test | Branch | Studio | Diff | Notes |
-|----------|------------|------|------|--------|--------|------|-------|`;
-
-  const tableRows = Object.keys(outcomes)
-    .map((lang) => {
-      return generateRow(lang, outcomes[lang], baseOutcomes?.[lang]);
+      return [lang, `${MD.Link({ text: "Link to conflict.", href: url })}`];
     })
-    .join("");
+    .filter((f): f is [string, string] => f !== null);
 
-  const installation = getInstallationInstructions({ outcomes });
+  if (!mergeConflicts.length) {
+    return null;
+  }
 
-  return `
-${makeHeader()}
+  const runURL = `https://github.com/${github.context.repo.owner}/${github.context.repo.repo}/actions/runs/${github.context.runId}`;
+  return MD.Dedent`
+    ${MD.Symbol.Zap} ${MD.Bold("Merge conflicts.")} You can resolve conflicts now; if you do, ${MD.Link({ text: "re-run this GitHub action", href: runURL })} to get diffs. If you merge before resolving conflicts, new conflict PRs will be created after merging.
 
-${tableHeader}${tableRows}
-
-You can freely modify the branches to add [custom code](https://app.stainlessapi.com/docs/guides/patch-custom-code).${installation ? `\n${installation}` : ""}
-    `;
+    ${MD.List(mergeConflicts.map(([lang, message]) => `${projectName}-${lang}: ${message}`))}
+  `;
 }
 
-function getInstallationInstructions({ outcomes }: { outcomes: Outcomes }) {
-  const npmCommit = (outcomes["typescript"] ?? outcomes["node"])?.commit
-    .completed.commit;
-  const npmPkgInstallCommand = npmCommit
-    ? `# ${outcomes["typescript"] ? "typescript" : "node"}
-npm install "${getPkgStainlessURL({ repo: npmCommit.repo, sha: npmCommit.sha })}"`
-    : "";
-  const npmGitHubInstallCommand = npmCommit
-    ? `# ${outcomes["typescript"] ? "typescript" : "node"}
-npm install "${getGitHubURL({ repo: npmCommit.repo })}"`
-    : "";
+type Details = Record<
+  string,
+  {
+    githubLink: string | null;
+    compareLink: string | null;
+    details: string[];
+    isPending: boolean;
+    isRegression: boolean;
+  }
+>;
 
-  const pythonCommit = outcomes["python"]?.commit.completed.commit;
-  const pythonPkgInstallCommand = pythonCommit
-    ? `# python
-pip install ${getPkgStainlessURL({ repo: pythonCommit.repo, sha: pythonCommit.sha })}`
-    : "";
-  const pythonGitHubInstallCommand = pythonCommit
-    ? `# python
-pip install git+${getGitHubURL({ repo: pythonCommit.repo })}`
-    : "";
+function getDetails({
+  base,
+  head,
+}: {
+  base?: Outcomes | null;
+  head: Outcomes;
+}) {
+  const result: Details = {};
 
-  // we should not show pkg.stainless.com install instructions until the SDK is built (and uploaded)
-  const npmBuild = (outcomes["typescript"] ?? outcomes["node"]).build;
-  const npmInstallCommand =
-    npmBuild?.status === "completed" &&
-    npmBuild.completed.conclusion === "success"
-      ? npmPkgInstallCommand
-      : npmGitHubInstallCommand;
+  for (const [lang, outcome] of Object.entries(head)) {
+    if (
+      !["error", "warning", "note", "success"].includes(
+        outcome.commit.completed.conclusion,
+      )
+    ) {
+      continue;
+    }
 
-  // similarly, we should not show pkg.stainless.com install instructions for python until the SDK is uploaded
-  const pythonUpload = outcomes["python"]?.upload;
-  const pythonInstallCommand =
-    pythonUpload?.status === "completed" &&
-    pythonUpload.completed.conclusion === "success"
-      ? pythonPkgInstallCommand
-      : pythonGitHubInstallCommand;
+    const details: string[] = [];
+    const baseOutcome = base?.[lang];
+    let githubLink: string | null = null;
+    let compareLink: string | null = null;
+    let isPending = false;
+    let isRegression = false;
 
-  return npmInstallCommand || pythonInstallCommand
-    ? `#### :package: Installation
-${[npmInstallCommand, pythonInstallCommand]
-  .filter(Boolean)
-  .map((cmd) => `\`\`\`bash\n${cmd}\n\`\`\``)
-  .join("\n")}`
-    : "";
+    // Get the GitHub link:
+    if (outcome.commit.completed.commit) {
+      const {
+        repo: { owner, name, branch },
+      } = outcome.commit.completed.commit;
+      const githubURL = `https://github.com/${owner}/${name}/tree/${branch}`;
+      githubLink = MD.Link({ text: "code", href: githubURL });
+    }
+
+    // Get the diff link:
+    if (
+      baseOutcome?.commit.completed.commit &&
+      outcome.commit.completed.commit
+    ) {
+      const {
+        repo: { owner, name },
+      } = outcome.commit.completed.commit;
+      const base = baseOutcome.commit.completed.commit.repo.branch;
+      const head = outcome.commit.completed.commit.repo.branch;
+      const compareURL = `https://github.com/${owner}/${name}/compare/${base}..${head}`;
+      // TODO: can we get a label with stats?
+      compareLink = MD.Link({ text: "diff", href: compareURL });
+    }
+
+    // Show a check if it fails, but previously succeeded or didn't exist:
+    for (const check of ["build", "lint", "test"] as const) {
+      const checkName =
+        check === "build" ? "Build" : check === "lint" ? "Lint" : "Test";
+
+      if (
+        (!baseOutcome?.[check] ||
+          (baseOutcome[check].status === "completed" &&
+            baseOutcome[check].completed.conclusion === "success")) &&
+        outcome[check] &&
+        outcome[check].status === "completed" &&
+        outcome[check].completed.conclusion === "failure"
+      ) {
+        const baseURL =
+          baseOutcome?.[check]?.status === "completed"
+            ? baseOutcome[check].completed.url
+            : null;
+        const baseText = `${MD.Symbol.WhiteCheckMark} success`;
+        const baseLink = baseURL
+          ? MD.Link({ text: baseText, href: baseURL })
+          : null;
+
+        const headURL = outcome[check].completed.url;
+        const headText = `${MD.Symbol.Exclamation} failure`;
+        const headLink = headURL
+          ? MD.Link({ text: headText, href: headURL })
+          : headText;
+
+        if (baseLink) {
+          details.push(
+            `${checkName}: ${baseLink} ${MD.Symbol.RightwardsArrow} ${headLink}`,
+          );
+        } else {
+          details.push(`${checkName}: ${headLink}`);
+        }
+
+        isRegression = true;
+      }
+
+      if (outcome[check] && outcome[check].status !== "completed") {
+        details.push(`${checkName}: ${MD.Symbol.HourglassFlowingSand} pending`);
+        isPending = true;
+      }
+    }
+
+    // New diagnostics. Show count of every severity, but only show the details
+    // of the first few diagnostics. Regression if we have a new non-info
+    // diagnostic.
+    if (baseOutcome?.diagnostics && outcome.diagnostics) {
+      const newDiagnostics = outcome.diagnostics.filter(
+        (d) =>
+          !baseOutcome.diagnostics.some(
+            (bd) =>
+              bd.code === d.code &&
+              bd.message === d.message &&
+              bd.config_ref === d.config_ref &&
+              bd.oas_ref === d.oas_ref,
+          ),
+      );
+      if (newDiagnostics.length > 0) {
+        const levelCounts: Record<DiagnosticLevel, number> = {
+          fatal: 0,
+          error: 0,
+          warning: 0,
+          note: 0,
+        };
+
+        for (const d of newDiagnostics) {
+          levelCounts[d.level]++;
+        }
+
+        if (
+          levelCounts.fatal > 0 ||
+          levelCounts.error > 0 ||
+          levelCounts.warning > 0
+        ) {
+          isRegression = true;
+        }
+
+        const diagnosticCounts = Object.entries(levelCounts)
+          .filter(([, count]) => count > 0)
+          .map(([level, count]) => `${count} ${level}`);
+
+        let hasOmittedDiagnostics = newDiagnostics.length > 10;
+        const diagnosticList = newDiagnostics
+          .slice(0, 10)
+          .map((d) => {
+            if (d.level === "note") {
+              hasOmittedDiagnostics = true;
+              return null;
+            }
+            return `${DiagnosticIcon[d.level]} ${MD.Bold(d.code)}: ${d.message}`;
+          })
+          .filter(Boolean) as string[];
+
+        details.push(
+          MD.Details({
+            summary: `New diagnostics (${diagnosticCounts.join(", ")})`,
+            body: MD.Dedent`
+              ${hasOmittedDiagnostics ? "Some diagnostics omitted. " : ""}See the Stainless Studio for more details.
+
+              ${MD.List(diagnosticList)}
+            `,
+          }),
+        );
+      }
+    }
+
+    // Installation instructions:
+    const installation = getInstallation(lang, outcome);
+    if (installation) {
+      details.push(
+        MD.Details({
+          summary: "Installation",
+          body: MD.CodeBlock({ content: installation, language: "bash" }),
+          indent: false,
+        }),
+      );
+    }
+
+    result[lang] = {
+      githubLink,
+      compareLink,
+      details,
+      isPending,
+      isRegression,
+    };
+  }
+
+  return result;
+}
+
+function printRegressions({
+  orgName,
+  projectName,
+  branch,
+  details,
+}: {
+  orgName: string;
+  projectName: string;
+  branch: string;
+  details: Details;
+}) {
+  const regressions = Object.entries(details).filter(
+    ([, { isRegression }]) => isRegression,
+  );
+
+  if (regressions.length === 0) {
+    return null;
+  }
+
+  const formattedRegressions = regressions.map(
+    ([lang, { githubLink, compareLink, details }]) => {
+      const studioURL = getStudioURL({
+        orgName,
+        projectName,
+        language: lang,
+        branch,
+      });
+      const studioLink = MD.Link({ text: "studio", href: studioURL });
+
+      const headingLinks = [studioLink, githubLink, compareLink]
+        .filter((link): link is string => link !== null)
+        .join(` ${MD.Symbol.MiddleDot} `);
+
+      return MD.Details({
+        summary: `${projectName}-${lang}: ${headingLinks}`,
+        body: details.join("\n\n"),
+        open: true,
+      });
+    },
+  );
+
+  return MD.Dedent`
+    ${MD.Symbol.Warning} ${MD.Bold("Regressions.")}
+
+    ${formattedRegressions.join("\n\n")}
+  `;
+}
+
+function printSuccesses({
+  orgName,
+  projectName,
+  branch,
+  details,
+}: {
+  orgName: string;
+  projectName: string;
+  branch: string;
+  details: Details;
+}) {
+  const successes = Object.entries(details).filter(
+    ([, { isPending, isRegression }]) => !isPending && !isRegression,
+  );
+
+  if (successes.length === 0) {
+    return null;
+  }
+
+  const formattedSuccesses = successes.map(
+    ([lang, { githubLink, compareLink, details }]) => {
+      const studioURL = getStudioURL({
+        orgName,
+        projectName,
+        language: lang,
+        branch,
+      });
+      const studioLink = MD.Link({ text: "studio", href: studioURL });
+
+      const headingLinks = [studioLink, githubLink, compareLink]
+        .filter((link): link is string => link !== null)
+        .join(` ${MD.Symbol.MiddleDot} `);
+      const summary = `${projectName}-${lang}: ${headingLinks}`;
+
+      return details.length > 0
+        ? MD.Details({ summary, body: details.join("\n\n") })
+        : `- ${summary}`;
+    },
+  );
+
+  return MD.Dedent`
+    ${MD.Symbol.WhiteCheckMark} ${MD.Bold("Successes.")}
+
+    ${formattedSuccesses.join("\n\n")}
+  `;
+}
+
+function printPending({ details }: { details: Details }) {
+  const pending = Object.entries(details).filter(
+    ([, { isPending }]) => isPending,
+  );
+
+  if (pending.length === 0) {
+    return null;
+  }
+
+  return MD.Dedent`
+    ${MD.Symbol.HourglassFlowingSand} These are partial results; builds are still running.
+  `;
+}
+
+function getInstallation(lang: string, outcome: Outcomes[string]) {
+  if (!outcome.commit.completed.commit) {
+    return null;
+  }
+
+  const { repo } = outcome.commit.completed.commit;
+
+  // TODO: update the API to return a URL, under build, and use that
+  switch (lang) {
+    case "typescript":
+    case "node": {
+      return `npm install ${getGitHubURL({ repo })}`;
+    }
+    case "python": {
+      return `pip install git+${getGitHubURL({ repo })}`;
+    }
+    default: {
+      return null;
+    }
+  }
 }
 
 function getGitHubURL({
@@ -176,58 +511,21 @@ function getGitHubURL({
   return `https://github.com/${repo.owner}/${repo.name}.git#${repo.branch}`;
 }
 
-function getPkgStainlessURL({
-  repo,
-  sha,
-}: {
-  repo: { name: string };
-  sha: string;
-}) {
-  return `https://pkg.stainless.com/s/${repo.name}/${sha}`;
-}
-
-export function generateMergeComment({
-  outcomes,
+function getStudioURL({
   orgName,
   projectName,
+  language,
+  branch,
 }: {
-  outcomes: Outcomes;
   orgName: string;
   projectName: string;
+  language?: string;
+  branch: string;
 }) {
-  const generateRow = (
-    lang: string,
-    outcome: NonNullable<typeof outcomes>[string],
-  ) => {
-    let studioUrl;
-
-    if (outcome.commit) {
-      studioUrl = `https://app.stainless.com/${orgName}/${projectName}/studio?language=${lang}&branch=main`;
-    }
-
-    const studioLink = studioUrl ? `[Studio](${studioUrl})` : "";
-
-    return `
-| ${lang} | ${outcome.commit.completed.conclusion} | ${studioLink} |`;
-  };
-
-  const header = `
-| Language | Conclusion | Studio |
-|----------|------------|--------|`;
-
-  const tableRows = Object.keys(outcomes)
-    .map((lang) => {
-      const outcome = outcomes[lang];
-      return generateRow(lang, outcome);
-    })
-    .join("");
-
-  return `
-### :rocket: SDK Build Status
-The following table summarizes the build outcomes for all languages:
-
-${header}${tableRows}
-`;
+  if (language) {
+    return `https://app.stainless.com/${orgName}/${projectName}/studio?language=${language}&branch=${branch}`;
+  }
+  return `https://app.stainless.com/${orgName}/${projectName}/studio?branch=${branch}`;
 }
 
 export async function upsertComment({
@@ -239,11 +537,11 @@ export async function upsertComment({
   token: string;
   skipCreate?: boolean;
 }) {
-  const client = createClient({
+  const client = createGitHubClient({
     authToken: token,
     owner: github.context.repo.owner,
     repo: github.context.repo.repo,
-    resources: [Comments],
+    resources: [GitHubComments],
   });
 
   console.log("Upserting comment on PR:", github.context.issue.number);
