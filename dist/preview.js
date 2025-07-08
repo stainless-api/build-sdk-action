@@ -33046,6 +33046,7 @@ var Symbol2 = {
 };
 var Bold = (content) => `<b>${content}</b>`;
 var CodeInline = (content) => `<code>${content}</code>`;
+var Comment = (content) => `<!-- ${content} -->`;
 var Italic = (content) => `<i>${content}</i>`;
 function Dedent(templ, ...args) {
   return (0, import_ts_dedent.dedent)(templ, ...args).trim().replaceAll(/\n\s*\n/gi, "\n\n");
@@ -33146,9 +33147,9 @@ function printCommitMessage({
   hasPending
 }) {
   return Dedent`
-    ${Symbol2.SpeechBalloon} This PR updates ${CodeInline(projectName)} SDKs with this commit message.
-    ${hasPending ? "" : " To change the commit message, edit this comment."}
+    ${Symbol2.SpeechBalloon} This PR updates ${CodeInline(projectName)} SDKs with this commit message.${hasPending ? "" : " To change the commit message, edit this comment."}
 
+    ${hasPending ? "" : Comment("Replace the contents of this code block with your commit message. Use a commit message in the conventional commits format: https://www.conventionalcommits.org/en/v1.0.0/")}
     ${CodeBlock(commitMessage)}
   `;
 }
