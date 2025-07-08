@@ -3,16 +3,27 @@ import type { Outcomes } from "./build";
 import { parseCommitMessage, printComment } from "./comment";
 import * as MD from "./markdown";
 
+vi.mock("@actions/github", () => {
+  return {
+    context: {
+      repo: {
+        owner: "test-org",
+        repo: "test-sdk",
+      },
+      runId: 200,
+    },
+  };
+});
+
 describe("printComment", () => {
   beforeAll(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2000-01-01"));
-    vi.stubEnv("GITHUB_REPOSITORY", "test-org/test-sdk");
   });
 
   afterAll(() => {
     vi.useRealTimers();
-    vi.unstubAllEnvs();
+    vi.clearAllMocks();
   });
 
   it("should print no changes comment", () => {
