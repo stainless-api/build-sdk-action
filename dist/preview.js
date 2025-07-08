@@ -33116,13 +33116,16 @@ function printComment({
       return "No changes were made to the SDKs.";
     }
     const details = getDetails({ base: baseOutcomes, head: outcomes });
+    const hasPending = Object.values(details).some(
+      ({ isPending }) => isPending
+    );
     return [
-      printCommitMessage({ commitMessage, projectName }),
+      printCommitMessage({ commitMessage, projectName, hasPending }),
       printFailures({ orgName, projectName, branch, outcomes }),
       printMergeConflicts({ projectName, outcomes }),
       printRegressions({ orgName, projectName, branch, details }),
       printSuccesses({ orgName, projectName, branch, details }),
-      printPending({ details })
+      printPending({ hasPending })
     ].filter((f) => f !== null).join(`
 
 `);
@@ -33139,10 +33142,12 @@ function printComment({
 }
 function printCommitMessage({
   commitMessage,
-  projectName
+  projectName,
+  hasPending
 }) {
   return Dedent`
     ${Symbol2.SpeechBalloon} This PR updates ${CodeInline(projectName)} SDKs with this commit message.
+    ${hasPending ? "" : " To change the commit message, edit this comment."}
 
     ${CodeBlock(commitMessage)}
   `;
@@ -33405,11 +33410,8 @@ function printSuccesses({
     ${formattedSuccesses.join("\n\n")}
   `;
 }
-function printPending({ details }) {
-  const pending = Object.entries(details).filter(
-    ([, { isPending }]) => isPending
-  );
-  if (pending.length === 0) {
+function printPending({ hasPending }) {
+  if (!hasPending) {
     return null;
   }
   return Dedent`

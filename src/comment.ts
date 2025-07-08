@@ -48,13 +48,16 @@ export function printComment({
     }
 
     const details = getDetails({ base: baseOutcomes, head: outcomes });
+    const hasPending = Object.values(details).some(
+      ({ isPending }) => isPending,
+    );
     return [
-      printCommitMessage({ commitMessage, projectName }),
+      printCommitMessage({ commitMessage, projectName, hasPending }),
       printFailures({ orgName, projectName, branch, outcomes }),
       printMergeConflicts({ projectName, outcomes }),
       printRegressions({ orgName, projectName, branch, details }),
       printSuccesses({ orgName, projectName, branch, details }),
-      printPending({ details }),
+      printPending({ hasPending }),
     ]
       .filter((f): f is string => f !== null)
       .join(`\n\n`);
@@ -77,12 +80,15 @@ export function printComment({
 function printCommitMessage({
   commitMessage,
   projectName,
+  hasPending,
 }: {
   commitMessage: string;
   projectName: string;
+  hasPending: boolean;
 }) {
   return MD.Dedent`
-    ${MD.Symbol.SpeechBalloon} This PR updates ${MD.CodeInline(projectName)} SDKs with this commit message. To change the commit message, edit this comment.
+    ${MD.Symbol.SpeechBalloon} This PR updates ${MD.CodeInline(projectName)} SDKs with this commit message.
+    ${hasPending ? "" : " To change the commit message, edit this comment."}
 
     ${MD.CodeBlock(commitMessage)}
   `;
@@ -470,12 +476,8 @@ function printSuccesses({
   `;
 }
 
-function printPending({ details }: { details: Details }) {
-  const pending = Object.entries(details).filter(
-    ([, { isPending }]) => isPending,
-  );
-
-  if (pending.length === 0) {
+function printPending({ hasPending }: { hasPending: boolean }) {
+  if (!hasPending) {
     return null;
   }
 

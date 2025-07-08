@@ -60,6 +60,9 @@ async function main() {
     if (!configChanged) {
       console.log("No config files changed, skipping preview");
 
+      // In this case, we only want to make a comment if there's an existing
+      // comment---which can happen if the changes introduced by the PR
+      // disappear for some reason.
       if (
         github.context.payload.pull_request!.action !== "opened" &&
         makeComment
