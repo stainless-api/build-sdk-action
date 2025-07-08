@@ -48,7 +48,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run build
-        uses: stainless-api/build-sdk-action@aff9976eb79c3ae12a4c04bed2d77b0466579eec
+        uses: stainless-api/build-sdk-action@317151f6a3df91a41f6fe9f6a5b98ffc016e5e64
         with:
           stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
           org: ${{ env.STAINLESS_ORG }}
