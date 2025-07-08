@@ -51,8 +51,12 @@ export function printComment({
     const hasPending = Object.values(details).some(
       ({ isPending }) => isPending,
     );
+    // Can edit if this is a preview comment (and thus baseOutcomes exist), and
+    // if there are no more pending results.
+    const canEdit = !hasPending && !!baseOutcomes;
+
     return [
-      printCommitMessage({ commitMessage, projectName, hasPending }),
+      printCommitMessage({ commitMessage, projectName, canEdit }),
       printFailures({ orgName, projectName, branch, outcomes }),
       printMergeConflicts({ projectName, outcomes }),
       printRegressions({ orgName, projectName, branch, details }),
@@ -80,16 +84,16 @@ export function printComment({
 function printCommitMessage({
   commitMessage,
   projectName,
-  hasPending,
+  canEdit,
 }: {
   commitMessage: string;
   projectName: string;
-  hasPending: boolean;
+  canEdit: boolean;
 }) {
   return MD.Dedent`
-    ${MD.Symbol.SpeechBalloon} This PR updates ${MD.CodeInline(projectName)} SDKs with this commit message.${hasPending ? "" : " To change the commit message, edit this comment."}
+    ${MD.Symbol.SpeechBalloon} This PR updates ${MD.CodeInline(projectName)} SDKs with this commit message.${canEdit ? " To change the commit message, edit this comment." : ""}
 
-    ${hasPending ? "" : MD.Comment("Replace the contents of this code block with your commit message. Use a commit message in the conventional commits format: https://www.conventionalcommits.org/en/v1.0.0/")}
+    ${canEdit ? MD.Comment("Replace the contents of this code block with your commit message. Use a commit message in the conventional commits format: https://www.conventionalcommits.org/en/v1.0.0/") : ""}
     ${MD.CodeBlock(commitMessage)}
   `;
 }

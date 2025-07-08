@@ -31047,7 +31047,7 @@ async function* runBuilds({
   );
   for (const waitFor of ["postgen", "completed"]) {
     const results = await Promise.all([
-      pollBuild({ stainless, build: base, waitFor: "postgen" }),
+      pollBuild({ stainless, build: base, waitFor: "completed" }),
       pollBuild({ stainless, build: head, waitFor })
     ]);
     let documentedSpecPath = null;
@@ -33118,8 +33118,9 @@ function printComment({
     const hasPending = Object.values(details).some(
       ({ isPending }) => isPending
     );
+    const canEdit = !hasPending && !!baseOutcomes;
     return [
-      printCommitMessage({ commitMessage, projectName, hasPending }),
+      printCommitMessage({ commitMessage, projectName, canEdit }),
       printFailures({ orgName, projectName, branch, outcomes }),
       printMergeConflicts({ projectName, outcomes }),
       printRegressions({ orgName, projectName, branch, details }),
@@ -33142,12 +33143,12 @@ function printComment({
 function printCommitMessage({
   commitMessage,
   projectName,
-  hasPending
+  canEdit
 }) {
   return Dedent`
-    ${Symbol2.SpeechBalloon} This PR updates ${CodeInline(projectName)} SDKs with this commit message.${hasPending ? "" : " To change the commit message, edit this comment."}
+    ${Symbol2.SpeechBalloon} This PR updates ${CodeInline(projectName)} SDKs with this commit message.${canEdit ? " To change the commit message, edit this comment." : ""}
 
-    ${hasPending ? "" : Comment("Replace the contents of this code block with your commit message. Use a commit message in the conventional commits format: https://www.conventionalcommits.org/en/v1.0.0/")}
+    ${canEdit ? Comment("Replace the contents of this code block with your commit message. Use a commit message in the conventional commits format: https://www.conventionalcommits.org/en/v1.0.0/") : ""}
     ${CodeBlock(commitMessage)}
   `;
 }
