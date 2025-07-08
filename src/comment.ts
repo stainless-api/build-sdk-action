@@ -82,7 +82,7 @@ function printCommitMessage({
   projectName: string;
 }) {
   return MD.Dedent`
-    ${MD.Symbol.SpeechBalloon} This PR updates ${MD.CodeInline(projectName)} SDKs with this commit message.
+    ${MD.Symbol.SpeechBalloon} This PR updates ${MD.CodeInline(projectName)} SDKs with this commit message. To change the commit message, edit this comment.
 
     ${MD.CodeBlock(commitMessage)}
   `;
