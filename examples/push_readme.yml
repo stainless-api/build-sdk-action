@@ -28,7 +28,7 @@ env:
 
   # The commit message to use for the SDK builds. Use a commit message in the
   # conventional commits format: https://www.conventionalcommits.org/en/v1.0.0/
-  COMMIT_MESSAGE: ${{ github.event.pull_request.title }}
+  COMMIT_MESSAGE: "feat(api): api update"
 
   # When to fail the job based on build conclusion.
   # Options: "never" | "note" | "warning" | "error" | "fatal".

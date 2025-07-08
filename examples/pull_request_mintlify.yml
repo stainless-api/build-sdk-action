@@ -26,8 +26,8 @@ env:
   # to maintain the ground truth Stainless config in your own repo.
   CONFIG_PATH: YOUR_CONFIG_PATH
 
-  # The commit message to use for the SDK builds. Use a commit message in the
-  # conventional commits format: https://www.conventionalcommits.org/en/v1.0.0/
+  # A default commit message for SDK builds. Can be overriden by editing the
+  # pull request comment.
   COMMIT_MESSAGE: ${{ github.event.pull_request.title }}
 
   # When to fail the job based on build conclusion.
