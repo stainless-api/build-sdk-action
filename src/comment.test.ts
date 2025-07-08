@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Outcomes } from "./build";
-import { printComment } from "./comment";
+import { parseCommitMessage, printComment } from "./comment";
+import * as MD from "./markdown";
 
 describe("printComment", () => {
   beforeAll(() => {
@@ -281,5 +282,25 @@ describe("printComment", () => {
         outcomes,
       }),
     ).toMatchSnapshot();
+  });
+});
+
+describe("parseCommitMessage", () => {
+  it("should parse commit message", () => {
+    const commitMessage = MD.Dedent(`
+      feat(api): add new thing
+
+      This is related to #243
+    `);
+
+    expect(
+      parseCommitMessage(
+        MD.Dedent(`
+          ${MD.Symbol.SpeechBalloon} This PR updates ${MD.CodeInline("test-project")} SDKs with this commit message.
+
+          ${MD.CodeBlock(commitMessage)}
+        `),
+      ),
+    ).toBe(commitMessage);
   });
 });

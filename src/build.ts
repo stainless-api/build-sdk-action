@@ -1,5 +1,5 @@
-import * as fs from "fs";
 import { Stainless } from "@stainless-api/sdk";
+import * as fs from "fs";
 
 type Build = Stainless.Builds.BuildObject;
 export type Outcomes = Record<
@@ -21,6 +21,12 @@ const isValidConventionalCommitMessage = (message: string) => {
 
 const POLLING_INTERVAL_SECONDS = 5;
 const MAX_POLLING_SECONDS = 10 * 60; // 10 minutes
+
+export type RunResult = {
+  baseOutcomes: Outcomes | null;
+  outcomes: Outcomes;
+  documentedSpecPath: string | null;
+};
 
 export async function* runBuilds({
   stainless,
@@ -46,7 +52,7 @@ export async function* runBuilds({
   guessConfig?: boolean;
   commitMessage?: string;
   outputDir?: string;
-}) {
+}): AsyncGenerator<RunResult> {
   if (mergeBranch && (oasPath || configPath)) {
     throw new Error(
       "Cannot specify both merge_branch and oas_path or config_path",
@@ -107,7 +113,7 @@ export async function* runBuilds({
         waitFor,
       });
 
-      let documentedSpecPath = null;
+      let documentedSpecPath: string | null = null;
       if (outputDir && documentedSpec) {
         documentedSpecPath = `${outputDir}/openapi.documented.yml`;
         fs.mkdirSync(outputDir, { recursive: true });
@@ -188,7 +194,7 @@ export async function* runBuilds({
       pollBuild({ stainless, build: head, waitFor }),
     ]);
 
-    let documentedSpecPath = null;
+    let documentedSpecPath: string | null = null;
     if (outputDir && results[1].documentedSpec) {
       documentedSpecPath = `${outputDir}/openapi.documented.yml`;
       fs.mkdirSync(outputDir, { recursive: true });
@@ -257,7 +263,8 @@ async function pollBuild({
             JSON.stringify(buildOutput),
           );
 
-          const diagnostics = [];
+          const diagnostics: Stainless.Builds.Diagnostics.DiagnosticListResponse[] =
+            [];
           try {
             for await (const diagnostic of stainless.builds.diagnostics.list(
               buildId,

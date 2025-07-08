@@ -8,9 +8,9 @@ import {
 import * as exec from "@actions/exec";
 import * as github from "@actions/github";
 import { Stainless } from "@stainless-api/sdk";
-import { checkResults, runBuilds } from "./build";
+import { checkResults, runBuilds, RunResult } from "./build";
+import { printComment, retrieveComment, upsertComment } from "./comment";
 import { isConfigChanged } from "./config";
-import { printComment, upsertComment } from "./comment";
 
 async function main() {
   try {
@@ -20,7 +20,7 @@ async function main() {
     const oasPath = getInput("oas_path", { required: true });
     const configPath =
       getInput("config_path", { required: false }) || undefined;
-    const commitMessage = getInput("commit_message", { required: true });
+    const defaultCommitMessage = getInput("commit_message", { required: true });
     const failRunOn = getInput("fail_on", { required: true }) || "error";
     const makeComment = getBooleanInput("make_comment", { required: true });
     const githubToken = getInput("github_token", { required: false });
@@ -91,10 +91,25 @@ async function main() {
 
     endGroup();
 
+    startGroup("Getting commit message");
+
+    let commitMessage = defaultCommitMessage;
+
+    if (makeComment && githubToken) {
+      const comment = await retrieveComment({ token: githubToken });
+      if (comment.commitMessage) {
+        commitMessage = comment.commitMessage;
+      }
+    }
+
+    console.log("Using commit message:", commitMessage);
+
+    endGroup();
+
     // Checkout HEAD for runBuilds to pull the files of:
     await exec.exec("git", ["checkout", headSha], { silent: true });
 
-    let latestRun;
+    let latestRun: RunResult;
 
     const generator = runBuilds({
       stainless,
@@ -170,7 +185,7 @@ async function getParentCommits({
     silent: true,
   });
 
-  let mergeBaseSha;
+  let mergeBaseSha: string | undefined;
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -197,7 +212,7 @@ async function getParentCommits({
 
   console.log(`Merge base: ${mergeBaseSha}`);
 
-  let nonMainBaseRef;
+  let nonMainBaseRef: string | undefined;
 
   if (baseRef !== defaultBranch) {
     nonMainBaseRef = `preview/${baseRef}`;

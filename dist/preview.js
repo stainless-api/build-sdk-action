@@ -31188,39 +31188,6 @@ function checkResults({
   return true;
 }
 
-// src/config.ts
-var exec = __toESM(require_exec());
-async function isConfigChanged({
-  before,
-  after,
-  oasPath,
-  configPath
-}) {
-  await exec.exec("git", ["fetch", "--depth=1", "origin", before], {
-    silent: true
-  });
-  await exec.exec("git", ["fetch", "--depth=1", "origin", after], {
-    silent: true
-  });
-  const diffOutput = await exec.getExecOutput("git", [
-    "diff",
-    "--name-only",
-    before,
-    after
-  ]);
-  const changedFiles = diffOutput.stdout.trim().split("\n");
-  let changed = false;
-  if (oasPath && changedFiles.includes(oasPath)) {
-    console.log("OAS file changed");
-    changed = true;
-  }
-  if (configPath && changedFiles.includes(configPath)) {
-    console.log("Config file changed");
-    changed = true;
-  }
-  return changed;
-}
-
 // src/comment.ts
 var github = __toESM(require_github());
 
@@ -33132,6 +33099,9 @@ var DiagnosticIcon = {
   warning: Symbol2.Warning,
   note: Symbol2.Bulb
 };
+var COMMENT_TITLE = Heading(
+  `${Symbol2.HeavyAsterisk} Stainless SDK previews`
+);
 function printComment({
   noChanges,
   orgName,
@@ -33158,7 +33128,7 @@ function printComment({
 `);
   })();
   return Dedent`
-    ${Heading(`${Symbol2.HeavyAsterisk} Stainless SDK previews`)}
+    ${COMMENT_TITLE}
 
     ${Italic(
     `Last updated: ${(/* @__PURE__ */ new Date()).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC")}`
@@ -33480,6 +33450,25 @@ function getStudioURL({
   }
   return `https://app.stainless.com/${orgName}/${projectName}/studio?branch=${branch}`;
 }
+function parseCommitMessage(body) {
+  return body?.match(/(?<!\\)```([\s\S]*?)(?<!\\)```/)?.[1].trim() ?? null;
+}
+async function retrieveComment({ token }) {
+  const client = createClient({
+    authToken: token,
+    owner: github.context.repo.owner,
+    repo: github.context.repo.repo,
+    resources: [Comments]
+  });
+  const { data: comments } = await client.repos.issues.comments.list(
+    github.context.issue.number
+  );
+  const existingComment = comments.find((comment) => comment.body?.includes(COMMENT_TITLE)) ?? null;
+  return {
+    id: existingComment?.id,
+    commitMessage: parseCommitMessage(existingComment?.body)
+  };
+}
 async function upsertComment({
   body,
   token,
@@ -33510,6 +33499,39 @@ async function upsertComment({
   }
 }
 
+// src/config.ts
+var exec = __toESM(require_exec());
+async function isConfigChanged({
+  before,
+  after,
+  oasPath,
+  configPath
+}) {
+  await exec.exec("git", ["fetch", "--depth=1", "origin", before], {
+    silent: true
+  });
+  await exec.exec("git", ["fetch", "--depth=1", "origin", after], {
+    silent: true
+  });
+  const diffOutput = await exec.getExecOutput("git", [
+    "diff",
+    "--name-only",
+    before,
+    after
+  ]);
+  const changedFiles = diffOutput.stdout.trim().split("\n");
+  let changed = false;
+  if (oasPath && changedFiles.includes(oasPath)) {
+    console.log("OAS file changed");
+    changed = true;
+  }
+  if (configPath && changedFiles.includes(configPath)) {
+    console.log("Config file changed");
+    changed = true;
+  }
+  return changed;
+}
+
 // src/preview.ts
 async function main() {
   try {
@@ -33518,7 +33540,7 @@ async function main() {
     const projectName = (0, import_core.getInput)("project", { required: true });
     const oasPath = (0, import_core.getInput)("oas_path", { required: true });
     const configPath = (0, import_core.getInput)("config_path", { required: false }) || void 0;
-    const commitMessage = (0, import_core.getInput)("commit_message", { required: true });
+    const defaultCommitMessage = (0, import_core.getInput)("commit_message", { required: true });
     const failRunOn = (0, import_core.getInput)("fail_on", { required: true }) || "error";
     const makeComment = (0, import_core.getBooleanInput)("make_comment", { required: true });
     const githubToken = (0, import_core.getInput)("github_token", { required: false });
@@ -33571,6 +33593,16 @@ async function main() {
       oasPath,
       configPath
     });
+    (0, import_core.endGroup)();
+    (0, import_core.startGroup)("Getting commit message");
+    let commitMessage = defaultCommitMessage;
+    if (makeComment && githubToken) {
+      const comment = await retrieveComment({ token: githubToken });
+      if (comment.commitMessage) {
+        commitMessage = comment.commitMessage;
+      }
+    }
+    console.log("Using commit message:", commitMessage);
     (0, import_core.endGroup)();
     await exec3.exec("git", ["checkout", headSha], { silent: true });
     let latestRun;

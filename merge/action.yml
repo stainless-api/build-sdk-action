@@ -28,6 +28,8 @@ inputs:
       Commit message to use in the commits in the SDK repo. Use a commit
       message in the conventional commits format:
       https://www.conventionalcommits.org/en/v1.0.0/
+      If `make_comment` is true, this is will be the default commit message,
+      and can be overridden by editing the pull request comment.
     required: true
   fail_on:
     description: >-

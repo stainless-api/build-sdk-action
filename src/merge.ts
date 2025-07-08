@@ -6,9 +6,9 @@ import {
   startGroup,
 } from "@actions/core";
 import { Stainless } from "@stainless-api/sdk";
+import { checkResults, runBuilds, RunResult } from "./build";
+import { printComment, retrieveComment, upsertComment } from "./comment";
 import { isConfigChanged } from "./config";
-import { checkResults, runBuilds } from "./build";
-import { printComment, upsertComment } from "./comment";
 
 async function main() {
   try {
@@ -18,7 +18,7 @@ async function main() {
     const oasPath = getInput("oas_path", { required: false });
     const configPath =
       getInput("config_path", { required: false }) || undefined;
-    const commitMessage = getInput("commit_message", { required: true });
+    const defaultCommitMessage = getInput("commit_message", { required: true });
     const failRunOn = getInput("fail_on", { required: true }) || "error";
     const makeComment = getBooleanInput("make_comment", { required: true });
     const githubToken = getInput("github_token", { required: false });
@@ -56,6 +56,21 @@ async function main() {
       return;
     }
 
+    startGroup("Getting commit message");
+
+    let commitMessage = defaultCommitMessage;
+
+    if (makeComment && githubToken) {
+      const comment = await retrieveComment({ token: githubToken });
+      if (comment.commitMessage) {
+        commitMessage = comment.commitMessage;
+      }
+    }
+
+    console.log("Using commit message:", commitMessage);
+
+    endGroup();
+
     const generator = runBuilds({
       stainless,
       projectName,
@@ -67,7 +82,7 @@ async function main() {
       outputDir,
     });
 
-    let latestRun;
+    let latestRun: RunResult;
 
     while (true) {
       startGroup("Running builds");
