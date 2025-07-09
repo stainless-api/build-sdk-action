@@ -54,7 +54,7 @@ jobs:
           fetch-depth: 2
 
       - name: Run preview builds
-        uses: stainless-api/build-sdk-action/preview@317151f6a3df91a41f6fe9f6a5b98ffc016e5e64
+        uses: stainless-api/build-sdk-action/preview@3fa5f068d05f51899b2903965e0ec395743d005f
         with:
           stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
           org: ${{ env.STAINLESS_ORG }}
@@ -75,7 +75,7 @@ jobs:
           fetch-depth: 2
 
       - name: Run merge build
-        uses: stainless-api/build-sdk-action/merge@317151f6a3df91a41f6fe9f6a5b98ffc016e5e64
+        uses: stainless-api/build-sdk-action/merge@3fa5f068d05f51899b2903965e0ec395743d005f
         with:
           stainless_api_key: ${{ secrets.STAINLESS_API_KEY }}
           org: ${{ env.STAINLESS_ORG }}
