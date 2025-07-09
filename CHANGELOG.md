@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.0](https://github.com/stainless-api/build-sdk-action/compare/v0.2.0...v1.0.0) (2025-07-09)
+
+
+### Miscellaneous Chores
+
+* release 1.0.0 ([7d1292d](https://github.com/stainless-api/build-sdk-action/commit/7d1292de9fe3187b0e40cb3ecb711f224247e664))
+
 ## [0.2.0](https://github.com/stainless-api/build-sdk-action/compare/v0.1.0...v0.2.0) (2025-07-09)
 
 
