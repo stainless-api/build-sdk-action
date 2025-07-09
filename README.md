@@ -1,5 +1,12 @@
 # Build Stainless SDKs from GitHub Actions
 
+> [!WARNING]
+> This GitHub action has been moved to [`upload-openapi-spec-action`](https://github.com/stainless-api/upload-openapi-spec-action).
+> Migrate by renaming the following:
+> - `build-sdk-action@any` → `upload-openapi-spec-action/build@v1`
+> - `build-sdk-action/preview@any` → `upload-openapi-spec-action/preview@v1`
+> - `build-sdk-action/merge@any` → `upload-openapi-spec-action/merge@v1`
+
 GitHub Actions for building [Stainless](https://stainless.com/) SDKs and
 previewing changes to an SDK from a pull request.
 
