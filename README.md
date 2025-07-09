@@ -6,6 +6,8 @@
 > - `build-sdk-action@any` → `upload-openapi-spec-action/build@v1`
 > - `build-sdk-action/preview@any` → `upload-openapi-spec-action/preview@v1`
 > - `build-sdk-action/merge@any` → `upload-openapi-spec-action/merge@v1`
+>
+> This action will no longer receive updates.
 
 GitHub Actions for building [Stainless](https://stainless.com/) SDKs and
 previewing changes to an SDK from a pull request.
