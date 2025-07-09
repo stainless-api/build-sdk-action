@@ -28,7 +28,10 @@ inputs:
       Commit message to use in the commits in the SDK repo. Use a commit
       message in the conventional commits format:
       https://www.conventionalcommits.org/en/v1.0.0/
-    required: true
+      If `make_comment` is true, this is only a default, and will be overriden
+      by the commit message specified in the comment.
+    required: false
+    default: ${{ github.event.pull_request.title }}
   fail_on:
     description: >-
       When to fail the run based on build conclusion. Options: 'note',

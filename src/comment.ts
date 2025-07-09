@@ -25,6 +25,10 @@ type PrintCommentOptions = {
   outcomes: Outcomes;
 };
 
+const COMMENT_TITLE = MD.Heading(
+  `${MD.Symbol.HeavyAsterisk} Stainless SDK previews`,
+);
+
 export function printComment({
   noChanges,
   orgName,
@@ -44,8 +48,15 @@ export function printComment({
     }
 
     const details = getDetails({ base: baseOutcomes, head: outcomes });
+
     return [
-      printCommitMessage({ commitMessage, projectName }),
+      printCommitMessage({
+        commitMessage,
+        projectName,
+        // Can edit if this is a preview comment (and thus baseOutcomes exist).
+        // Otherwise, this is post-merge and editing it won't do anything.
+        canEdit: !!baseOutcomes,
+      }),
       printFailures({ orgName, projectName, branch, outcomes }),
       printMergeConflicts({ projectName, outcomes }),
       printRegressions({ orgName, projectName, branch, details }),
@@ -57,7 +68,7 @@ export function printComment({
   })();
 
   return MD.Dedent`
-    ${MD.Heading(`${MD.Symbol.HeavyAsterisk} Stainless SDK previews`)}
+    ${COMMENT_TITLE}
 
     ${MD.Italic(
       `Last updated: ${new Date()
@@ -73,14 +84,16 @@ export function printComment({
 function printCommitMessage({
   commitMessage,
   projectName,
+  canEdit,
 }: {
   commitMessage: string;
   projectName: string;
+  canEdit: boolean;
 }) {
-  // TODO: support editing comment to change commit message
   return MD.Dedent`
-    ${MD.Symbol.SpeechBalloon} This PR updates ${MD.CodeInline(projectName)} SDKs with this commit message.
+    ${MD.Symbol.SpeechBalloon} This PR updates ${MD.CodeInline(projectName)} SDKs with this commit message.${canEdit ? " To change the commit message, edit this comment." : ""}
 
+    ${canEdit ? MD.Comment("Replace the contents of this code block with your commit message. Use a commit message in the conventional commits format: https://www.conventionalcommits.org/en/v1.0.0/") : ""}
     ${MD.CodeBlock(commitMessage)}
   `;
 }
@@ -279,7 +292,10 @@ function getDetails({
         isRegression = true;
       }
 
-      if (outcome[check] && outcome[check].status !== "completed") {
+      if (
+        (baseOutcome?.[check] && baseOutcome[check].status !== "completed") ||
+        (outcome[check] && outcome[check].status !== "completed")
+      ) {
         details.push(`${checkName}: ${MD.Symbol.HourglassFlowingSand} pending`);
         isPending = true;
       }
@@ -468,11 +484,9 @@ function printSuccesses({
 }
 
 function printPending({ details }: { details: Details }) {
-  const pending = Object.entries(details).filter(
-    ([, { isPending }]) => isPending,
-  );
+  const hasPending = Object.values(details).some(({ isPending }) => isPending);
 
-  if (pending.length === 0) {
+  if (!hasPending) {
     return null;
   }
 
@@ -526,6 +540,31 @@ function getStudioURL({
     return `https://app.stainless.com/${orgName}/${projectName}/studio?language=${language}&branch=${branch}`;
   }
   return `https://app.stainless.com/${orgName}/${projectName}/studio?branch=${branch}`;
+}
+
+export function parseCommitMessage(body?: string | null) {
+  return body?.match(/(?<!\\)```([\s\S]*?)(?<!\\)```/)?.[1].trim() ?? null;
+}
+
+export async function retrieveComment({ token }: { token: string }) {
+  const client = createGitHubClient({
+    authToken: token,
+    owner: github.context.repo.owner,
+    repo: github.context.repo.repo,
+    resources: [GitHubComments],
+  });
+
+  const { data: comments } = await client.repos.issues.comments.list(
+    github.context.issue.number,
+  );
+
+  const existingComment =
+    comments.find((comment) => comment.body?.includes(COMMENT_TITLE)) ?? null;
+
+  return {
+    id: existingComment?.id,
+    commitMessage: parseCommitMessage(existingComment?.body),
+  };
 }
 
 export async function upsertComment({

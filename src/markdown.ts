@@ -20,6 +20,8 @@ export const Bold = (content: string) => `<b>${content}</b>`;
 
 export const CodeInline = (content: string) => `<code>${content}</code>`;
 
+export const Comment = (content: string) => `<!-- ${content} -->`;
+
 export const Italic = (content: string) => `<i>${content}</i>`;
 
 export function Dedent(

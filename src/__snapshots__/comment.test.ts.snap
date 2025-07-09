@@ -5,8 +5,9 @@ exports[`printComment > should print comment 1`] = `
 
 <i>Last updated: 2000-01-01 00:00:00 UTC</i>
 
-💬 This PR updates <code>test-project</code> SDKs with this commit message.
+💬 This PR updates <code>test-project</code> SDKs with this commit message. To change the commit message, edit this comment.
 
+<!-- Replace the contents of this code block with your commit message. Use a commit message in the conventional commits format: https://www.conventionalcommits.org/en/v1.0.0/ -->
 \`\`\`
 Update API endpoints
 \`\`\`
@@ -17,7 +18,7 @@ Update API endpoints
 <li>test-project-python: Fatal error.</li>
 </ul>
 
-⚡ <b>Merge conflicts.</b> You can resolve conflicts now; if you do, <a href="https://github.com/test-org/test-sdk/actions/runs/NaN">re-run this GitHub action</a> to get diffs. If you merge before resolving conflicts, new conflicts will be created after merging.
+⚡ <b>Merge conflicts.</b> You can resolve conflicts now; if you do, <a href="https://github.com/test-org/test-sdk/actions/runs/200">re-run this GitHub action</a> to get diffs. If you merge before resolving conflicts, new conflict PRs will be created after merging.
 
 <ul>
 <li>test-project-go: <a href="https://github.com/test-org/test-sdk/pull/1">Link to conflict.</a></li>
@@ -52,7 +53,7 @@ See the Stainless Studio for more details.
 <summary>Installation</summary>
 
 \`\`\`bash
-npm install "https://github.com/test-org/test-sdk.git#feature-branch"
+npm install https://github.com/test-org/test-sdk.git#feature-branch
 \`\`\`
 
 </details>
@@ -63,5 +64,7 @@ npm install "https://github.com/test-org/test-sdk.git#feature-branch"
 
 ✅ <b>Successes.</b>
 
-- test-project-kotlin: <a href="https://app.stainless.com/test-org/test-project/studio?language=kotlin&branch=feature-branch">studio</a> · <a href="https://github.com/test-org/test-sdk/tree/feature-branch">code</a>"
+- test-project-kotlin: <a href="https://app.stainless.com/test-org/test-project/studio?language=kotlin&branch=feature-branch">studio</a> · <a href="https://github.com/test-org/test-sdk/tree/feature-branch">code</a>
+
+⏳ These are partial results; builds are still running."
 `;

@@ -30902,39 +30902,6 @@ Stainless.Builds = Builds;
 Stainless.Orgs = Orgs;
 Stainless.Generate = Generate;
 
-// src/config.ts
-var exec = __toESM(require_exec());
-async function isConfigChanged({
-  before,
-  after,
-  oasPath,
-  configPath
-}) {
-  await exec.exec("git", ["fetch", "--depth=1", "origin", before], {
-    silent: true
-  });
-  await exec.exec("git", ["fetch", "--depth=1", "origin", after], {
-    silent: true
-  });
-  const diffOutput = await exec.getExecOutput("git", [
-    "diff",
-    "--name-only",
-    before,
-    after
-  ]);
-  const changedFiles = diffOutput.stdout.trim().split("\n");
-  let changed = false;
-  if (oasPath && changedFiles.includes(oasPath)) {
-    console.log("OAS file changed");
-    changed = true;
-  }
-  if (configPath && changedFiles.includes(configPath)) {
-    console.log("Config file changed");
-    changed = true;
-  }
-  return changed;
-}
-
 // src/build.ts
 var fs = __toESM(require("fs"));
 var CONVENTIONAL_COMMIT_REGEX = new RegExp(
@@ -31080,7 +31047,7 @@ async function* runBuilds({
   );
   for (const waitFor of ["postgen", "completed"]) {
     const results = await Promise.all([
-      pollBuild({ stainless, build: base, waitFor: "postgen" }),
+      pollBuild({ stainless, build: base, waitFor }),
       pollBuild({ stainless, build: head, waitFor })
     ]);
     let documentedSpecPath = null;
@@ -33077,6 +33044,7 @@ var Symbol2 = {
 };
 var Bold = (content) => `<b>${content}</b>`;
 var CodeInline = (content) => `<code>${content}</code>`;
+var Comment = (content) => `<!-- ${content} -->`;
 var Italic = (content) => `<i>${content}</i>`;
 function Dedent(templ, ...args) {
   return (0, import_ts_dedent.dedent)(templ, ...args).trim().replaceAll(/\n\s*\n/gi, "\n\n");
@@ -33130,6 +33098,9 @@ var DiagnosticIcon = {
   warning: Symbol2.Warning,
   note: Symbol2.Bulb
 };
+var COMMENT_TITLE = Heading(
+  `${Symbol2.HeavyAsterisk} Stainless SDK previews`
+);
 function printComment({
   noChanges,
   orgName,
@@ -33145,7 +33116,13 @@ function printComment({
     }
     const details = getDetails({ base: baseOutcomes, head: outcomes });
     return [
-      printCommitMessage({ commitMessage, projectName }),
+      printCommitMessage({
+        commitMessage,
+        projectName,
+        // Can edit if this is a preview comment (and thus baseOutcomes exist).
+        // Otherwise, this is post-merge and editing it won't do anything.
+        canEdit: !!baseOutcomes
+      }),
       printFailures({ orgName, projectName, branch, outcomes }),
       printMergeConflicts({ projectName, outcomes }),
       printRegressions({ orgName, projectName, branch, details }),
@@ -33156,7 +33133,7 @@ function printComment({
 `);
   })();
   return Dedent`
-    ${Heading(`${Symbol2.HeavyAsterisk} Stainless SDK previews`)}
+    ${COMMENT_TITLE}
 
     ${Italic(
     `Last updated: ${(/* @__PURE__ */ new Date()).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC")}`
@@ -33167,11 +33144,13 @@ function printComment({
 }
 function printCommitMessage({
   commitMessage,
-  projectName
+  projectName,
+  canEdit
 }) {
   return Dedent`
-    ${Symbol2.SpeechBalloon} This PR updates ${CodeInline(projectName)} SDKs with this commit message.
+    ${Symbol2.SpeechBalloon} This PR updates ${CodeInline(projectName)} SDKs with this commit message.${canEdit ? " To change the commit message, edit this comment." : ""}
 
+    ${canEdit ? Comment("Replace the contents of this code block with your commit message. Use a commit message in the conventional commits format: https://www.conventionalcommits.org/en/v1.0.0/") : ""}
     ${CodeBlock(commitMessage)}
   `;
 }
@@ -33301,7 +33280,7 @@ function getDetails({
         }
         isRegression = true;
       }
-      if (outcome[check] && outcome[check].status !== "completed") {
+      if (baseOutcome?.[check] && baseOutcome[check].status !== "completed" || outcome[check] && outcome[check].status !== "completed") {
         details.push(`${checkName}: ${Symbol2.HourglassFlowingSand} pending`);
         isPending = true;
       }
@@ -33434,10 +33413,8 @@ function printSuccesses({
   `;
 }
 function printPending({ details }) {
-  const pending = Object.entries(details).filter(
-    ([, { isPending }]) => isPending
-  );
-  if (pending.length === 0) {
+  const hasPending = Object.values(details).some(({ isPending }) => isPending);
+  if (!hasPending) {
     return null;
   }
   return Dedent`
@@ -33478,6 +33455,25 @@ function getStudioURL({
   }
   return `https://app.stainless.com/${orgName}/${projectName}/studio?branch=${branch}`;
 }
+function parseCommitMessage(body) {
+  return body?.match(/(?<!\\)```([\s\S]*?)(?<!\\)```/)?.[1].trim() ?? null;
+}
+async function retrieveComment({ token }) {
+  const client = createClient({
+    authToken: token,
+    owner: github.context.repo.owner,
+    repo: github.context.repo.repo,
+    resources: [Comments]
+  });
+  const { data: comments } = await client.repos.issues.comments.list(
+    github.context.issue.number
+  );
+  const existingComment = comments.find((comment) => comment.body?.includes(COMMENT_TITLE)) ?? null;
+  return {
+    id: existingComment?.id,
+    commitMessage: parseCommitMessage(existingComment?.body)
+  };
+}
 async function upsertComment({
   body,
   token,
@@ -33508,6 +33504,39 @@ async function upsertComment({
   }
 }
 
+// src/config.ts
+var exec = __toESM(require_exec());
+async function isConfigChanged({
+  before,
+  after,
+  oasPath,
+  configPath
+}) {
+  await exec.exec("git", ["fetch", "--depth=1", "origin", before], {
+    silent: true
+  });
+  await exec.exec("git", ["fetch", "--depth=1", "origin", after], {
+    silent: true
+  });
+  const diffOutput = await exec.getExecOutput("git", [
+    "diff",
+    "--name-only",
+    before,
+    after
+  ]);
+  const changedFiles = diffOutput.stdout.trim().split("\n");
+  let changed = false;
+  if (oasPath && changedFiles.includes(oasPath)) {
+    console.log("OAS file changed");
+    changed = true;
+  }
+  if (configPath && changedFiles.includes(configPath)) {
+    console.log("Config file changed");
+    changed = true;
+  }
+  return changed;
+}
+
 // src/merge.ts
 async function main() {
   try {
@@ -33516,7 +33545,7 @@ async function main() {
     const projectName = (0, import_core.getInput)("project", { required: true });
     const oasPath = (0, import_core.getInput)("oas_path", { required: false });
     const configPath = (0, import_core.getInput)("config_path", { required: false }) || void 0;
-    const commitMessage = (0, import_core.getInput)("commit_message", { required: true });
+    const defaultCommitMessage = (0, import_core.getInput)("commit_message", { required: true });
     const failRunOn = (0, import_core.getInput)("fail_on", { required: true }) || "error";
     const makeComment = (0, import_core.getBooleanInput)("make_comment", { required: true });
     const githubToken = (0, import_core.getInput)("github_token", { required: false });
@@ -33548,6 +33577,14 @@ async function main() {
       console.log("No config files changed, skipping merge");
       return;
     }
+    let commitMessage = defaultCommitMessage;
+    if (makeComment && githubToken) {
+      const comment = await retrieveComment({ token: githubToken });
+      if (comment.commitMessage) {
+        commitMessage = comment.commitMessage;
+      }
+    }
+    console.log("Using commit message:", commitMessage);
     const generator = runBuilds({
       stainless,
       projectName,

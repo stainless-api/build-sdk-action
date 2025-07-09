@@ -7,7 +7,8 @@
     "build": "npm run build:index && npm run build:merge && npm run build:preview",
     "build:index": "esbuild --bundle src/index.ts --outdir=dist --platform=node --target=node20",
     "build:merge": "esbuild --bundle src/merge.ts --outdir=dist --platform=node --target=node20",
-    "build:preview": "esbuild --bundle src/preview.ts --outdir=dist --platform=node --target=node20"
+    "build:preview": "esbuild --bundle src/preview.ts --outdir=dist --platform=node --target=node20",
+    "test": "vitest"
   },
   "keywords": [],
   "author": "",
