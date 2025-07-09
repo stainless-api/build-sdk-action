@@ -31047,7 +31047,7 @@ async function* runBuilds({
   );
   for (const waitFor of ["postgen", "completed"]) {
     const results = await Promise.all([
-      pollBuild({ stainless, build: base, waitFor: "completed" }),
+      pollBuild({ stainless, build: base, waitFor }),
       pollBuild({ stainless, build: head, waitFor })
     ]);
     let documentedSpecPath = null;
@@ -33115,17 +33115,19 @@ function printComment({
       return "No changes were made to the SDKs.";
     }
     const details = getDetails({ base: baseOutcomes, head: outcomes });
-    const hasPending = Object.values(details).some(
-      ({ isPending }) => isPending
-    );
-    const canEdit = !hasPending && !!baseOutcomes;
     return [
-      printCommitMessage({ commitMessage, projectName, canEdit }),
+      printCommitMessage({
+        commitMessage,
+        projectName,
+        // Can edit if this is a preview comment (and thus baseOutcomes exist).
+        // Otherwise, this is post-merge and editing it won't do anything.
+        canEdit: !!baseOutcomes
+      }),
       printFailures({ orgName, projectName, branch, outcomes }),
       printMergeConflicts({ projectName, outcomes }),
       printRegressions({ orgName, projectName, branch, details }),
       printSuccesses({ orgName, projectName, branch, details }),
-      printPending({ hasPending })
+      printPending({ details })
     ].filter((f) => f !== null).join(`
 
 `);
@@ -33278,7 +33280,7 @@ function getDetails({
         }
         isRegression = true;
       }
-      if (outcome[check] && outcome[check].status !== "completed") {
+      if (baseOutcome?.[check] && baseOutcome[check].status !== "completed" || outcome[check] && outcome[check].status !== "completed") {
         details.push(`${checkName}: ${Symbol2.HourglassFlowingSand} pending`);
         isPending = true;
       }
@@ -33410,7 +33412,8 @@ function printSuccesses({
     ${formattedSuccesses.join("\n\n")}
   `;
 }
-function printPending({ hasPending }) {
+function printPending({ details }) {
+  const hasPending = Object.values(details).some(({ isPending }) => isPending);
   if (!hasPending) {
     return null;
   }
@@ -33574,7 +33577,6 @@ async function main() {
       console.log("No config files changed, skipping merge");
       return;
     }
-    (0, import_core.startGroup)("Getting commit message");
     let commitMessage = defaultCommitMessage;
     if (makeComment && githubToken) {
       const comment = await retrieveComment({ token: githubToken });
@@ -33583,7 +33585,6 @@ async function main() {
       }
     }
     console.log("Using commit message:", commitMessage);
-    (0, import_core.endGroup)();
     const generator = runBuilds({
       stainless,
       projectName,

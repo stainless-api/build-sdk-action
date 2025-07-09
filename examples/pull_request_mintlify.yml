@@ -26,10 +26,6 @@ env:
   # to maintain the ground truth Stainless config in your own repo.
   CONFIG_PATH: YOUR_CONFIG_PATH
 
-  # A default commit message for SDK builds. Can be overriden by editing the
-  # pull request comment.
-  COMMIT_MESSAGE: ${{ github.event.pull_request.title }}
-
   # When to fail the job based on build conclusion.
   # Options: "never" | "note" | "warning" | "error" | "fatal".
   FAIL_ON: error
@@ -71,7 +67,6 @@ jobs:
           project: ${{ env.STAINLESS_PROJECT }}
           oas_path: ${{ env.OAS_PATH }}
           config_path: ${{ env.CONFIG_PATH }}
-          commit_message: ${{ env.COMMIT_MESSAGE }}
           fail_on: ${{ env.FAIL_ON }}
 
   merge:
@@ -101,7 +96,6 @@ jobs:
           project: ${{ env.STAINLESS_PROJECT }}
           oas_path: ${{ env.OAS_PATH }}
           config_path: ${{ env.CONFIG_PATH }}
-          commit_message: ${{ env.COMMIT_MESSAGE }}
           fail_on: ${{ env.FAIL_ON }}
 
       - name: Push spec to Mintlify

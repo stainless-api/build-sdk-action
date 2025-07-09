@@ -188,9 +188,9 @@ export async function* runBuilds({
   );
 
   for (const waitFor of ["postgen", "completed"] as const) {
-    // yield once when the head is in postgen and again once it's completed
+    // yield once in postgen and again once it's completed
     const results = await Promise.all([
-      pollBuild({ stainless, build: base, waitFor: "completed" }),
+      pollBuild({ stainless, build: base, waitFor }),
       pollBuild({ stainless, build: head, waitFor }),
     ]);
 

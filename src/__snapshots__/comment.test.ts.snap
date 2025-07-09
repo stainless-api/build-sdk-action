@@ -5,8 +5,9 @@ exports[`printComment > should print comment 1`] = `
 
 <i>Last updated: 2000-01-01 00:00:00 UTC</i>
 
-💬 This PR updates <code>test-project</code> SDKs with this commit message.
+💬 This PR updates <code>test-project</code> SDKs with this commit message. To change the commit message, edit this comment.
 
+<!-- Replace the contents of this code block with your commit message. Use a commit message in the conventional commits format: https://www.conventionalcommits.org/en/v1.0.0/ -->
 \`\`\`
 Update API endpoints
 \`\`\`

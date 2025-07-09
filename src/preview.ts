@@ -94,11 +94,9 @@ async function main() {
 
     endGroup();
 
-    startGroup("Getting commit message");
-
     let commitMessage = defaultCommitMessage;
 
-    if (makeComment && githubToken) {
+    if (makeComment) {
       const comment = await retrieveComment({ token: githubToken });
       if (comment.commitMessage) {
         commitMessage = comment.commitMessage;
@@ -106,8 +104,6 @@ async function main() {
     }
 
     console.log("Using commit message:", commitMessage);
-
-    endGroup();
 
     // Checkout HEAD for runBuilds to pull the files of:
     await exec.exec("git", ["checkout", headSha], { silent: true });
@@ -152,6 +148,12 @@ async function main() {
         const { outcomes, baseOutcomes } = latestRun;
 
         startGroup("Updating comment");
+
+        // In case the comment was updated between polls:
+        const comment = await retrieveComment({ token: githubToken });
+        if (comment.commitMessage) {
+          commitMessage = comment.commitMessage;
+        }
 
         const commentBody = printComment({
           orgName,

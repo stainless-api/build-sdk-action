@@ -56,8 +56,6 @@ async function main() {
       return;
     }
 
-    startGroup("Getting commit message");
-
     let commitMessage = defaultCommitMessage;
 
     if (makeComment && githubToken) {
@@ -68,8 +66,6 @@ async function main() {
     }
 
     console.log("Using commit message:", commitMessage);
-
-    endGroup();
 
     const generator = runBuilds({
       stainless,

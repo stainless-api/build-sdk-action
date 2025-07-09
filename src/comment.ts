@@ -48,20 +48,20 @@ export function printComment({
     }
 
     const details = getDetails({ base: baseOutcomes, head: outcomes });
-    const hasPending = Object.values(details).some(
-      ({ isPending }) => isPending,
-    );
-    // Can edit if this is a preview comment (and thus baseOutcomes exist), and
-    // if there are no more pending results.
-    const canEdit = !hasPending && !!baseOutcomes;
 
     return [
-      printCommitMessage({ commitMessage, projectName, canEdit }),
+      printCommitMessage({
+        commitMessage,
+        projectName,
+        // Can edit if this is a preview comment (and thus baseOutcomes exist).
+        // Otherwise, this is post-merge and editing it won't do anything.
+        canEdit: !!baseOutcomes,
+      }),
       printFailures({ orgName, projectName, branch, outcomes }),
       printMergeConflicts({ projectName, outcomes }),
       printRegressions({ orgName, projectName, branch, details }),
       printSuccesses({ orgName, projectName, branch, details }),
-      printPending({ hasPending }),
+      printPending({ details }),
     ]
       .filter((f): f is string => f !== null)
       .join(`\n\n`);
@@ -292,7 +292,10 @@ function getDetails({
         isRegression = true;
       }
 
-      if (outcome[check] && outcome[check].status !== "completed") {
+      if (
+        (baseOutcome?.[check] && baseOutcome[check].status !== "completed") ||
+        (outcome[check] && outcome[check].status !== "completed")
+      ) {
         details.push(`${checkName}: ${MD.Symbol.HourglassFlowingSand} pending`);
         isPending = true;
       }
@@ -480,7 +483,9 @@ function printSuccesses({
   `;
 }
 
-function printPending({ hasPending }: { hasPending: boolean }) {
+function printPending({ details }: { details: Details }) {
+  const hasPending = Object.values(details).some(({ isPending }) => isPending);
+
   if (!hasPending) {
     return null;
   }

@@ -21727,7 +21727,7 @@ async function* runBuilds({
   );
   for (const waitFor of ["postgen", "completed"]) {
     const results = await Promise.all([
-      pollBuild({ stainless, build: base, waitFor: "completed" }),
+      pollBuild({ stainless, build: base, waitFor }),
       pollBuild({ stainless, build: head, waitFor })
     ]);
     let documentedSpecPath = null;
